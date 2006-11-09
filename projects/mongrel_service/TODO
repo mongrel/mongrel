@@ -1,0 +1,7 @@
+= mongrel_service (native) TODO List
+
+  * Port code from ServiceFB samples to the repository
+  * Implement single service code
+  * Check SendSignal.cpp and provide a simplified API to mongrel_service
+  * Adjust Rakefile to compile ServiceFB library and native binaries
+  
