@@ -17,15 +17,13 @@ typedef unsigned int RETVAL;
 #define _TeardownLastError(rv, errorsource) \
     { \
         RETVAL rv2__=GetLastError(); \
-        // printf(errorsource " failed with 0x%08X.\n", rv2__); \
-        if (EXIT_OK==rv) { \
+       if (EXIT_OK==rv) { \
             rv=rv2__; \
         } \
     }
 
 #define _TeardownIfError(rv, rv2, errorsource) \
     if (EXIT_OK!=rv2) { \
-        // printf(errorsource " failed with 0x%08X.\n", rv2); \
         if (EXIT_OK==rv) { \
             rv=rv2; \
         } \
@@ -33,44 +31,36 @@ typedef unsigned int RETVAL;
 
 #define _JumpLastError(rv, label, errorsource) \
     rv=GetLastError(); \
-    // printf(errorsource " failed with 0x%08X.\n", rv); \
     goto label;
 
 #define _JumpLastErrorStr(rv, label, errorsource, str) \
     rv=GetLastError(); \
-    // printf( errorsource "(%s) failed with 0x%08X.\n", str, rv); \
     goto label;
 
 #define _JumpIfError(rv, label, errorsource) \
     if (EXIT_OK!=rv) {\
-        // printf( errorsource " failed with 0x%08X.\n", rv); \
         goto label; \
     }
 
 #define _JumpIfErrorStr(rv, label, errorsource, str) \
     if (EXIT_OK!=rv) {\
-        // printf( errorsource "(%s) failed with 0x%08X.\n", str, rv); \
         goto label; \
     }
 
 #define _JumpError(rv, label, errorsource) \
-    // printf( errorsource " failed with 0x%08X.\n", rv); \
     goto label;
 
 #define _JumpErrorStr(rv, label, errorsource, str) \
-    // printf( errorsource "(%s) failed with 0x%08X.\n", str, rv); \
     goto label;
 
 #define _JumpIfOutOfMemory(rv, label, pointer) \
     if (NULL==(pointer)) { \
         rv=ERROR_NOT_ENOUGH_MEMORY; \
-        // printf("Out of memory ('" #pointer "').\n"); \
         goto label; \
     }
 
 #define _Verify(expression, rv, label) \
     if (!(expression)) { \
-        // printf("Verify failed: '%s' is false.\n", #expression); \
         rv=E_UNEXPECTED; \
         goto label; \
     }
@@ -126,13 +116,7 @@ RETVAL StartRemoteThread(HANDLE hRemoteProc, DWORD dwEntryPoint){
     if (STATUS_CONTROL_C_EXIT==rv) {
         // printf("Target process was killed.\n");
         rv=EXIT_OK;
-    } else if (EXIT_OK!=rv) {
-        // printf("(remote function) failed with 0x%08X.\n", rv);
-        //if (ERROR_INVALID_HANDLE==rv) {
-        //    printf("Are you sure this is a console application?\n");
-        //}
     }
-
 
 error:
     if (NULL!=hRemoteThread) {
@@ -201,7 +185,6 @@ RETVAL AdvancedOpenProcess(DWORD dwPid, HANDLE * phRemoteProc) {
         if (ERROR_ACCESS_DENIED!=rv) {
             _JumpError(rv, error, "OpenProcess");
         }
-        // printf("Access denied; retrying with increased privileges.\n");
 
         // give ourselves god-like access over process handles
         if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hThisProcToken)) {
@@ -225,9 +208,6 @@ RETVAL AdvancedOpenProcess(DWORD dwPid, HANDLE * phRemoteProc) {
     rv=EXIT_OK;
 
 error:
-    if (ERROR_ACCESS_DENIED==rv && false==bDebugPriv) {
-        // printf("You need administrative access (debug privilege) to access this process.\n");
-    }
     if (true==bDebugPriv) {
         rv2=SetPrivilege(hThisProcToken, SE_DEBUG_NAME, false);
         _TeardownIfError(rv, rv2, "SetPrivilege");
@@ -251,7 +231,6 @@ BOOL WINAPI MyHandler(DWORD dwCtrlType) {
         return FALSE;
     }
 
-    //printf("Received ctrl-break event\n");
     if (NULL==g_dwCtrlRoutineAddr) {
 
         // read the stack base address from the TEB
@@ -339,10 +318,6 @@ error:
         if (!CloseHandle(hRemoteProc)) {
             _TeardownLastError(rv, "CloseHandle");
         }
-    }
-    if (EXIT_OK!=rv) {
-        // printf("0x%08X == ", rv);
-        // PrintError(rv);
     }
     return rv;
 }

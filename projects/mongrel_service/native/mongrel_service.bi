@@ -26,3 +26,22 @@
 '# 
 '##################################################################
 
+#define SERVICEFB_INCLUDE_UTILS
+#include once "lib/ServiceFB/ServiceFB.bi"
+
+namespace mongrel_service
+    using fb.svc
+    
+    '# SingleMongrel
+    type SingleMongrel
+        declare constructor()
+        declare destructor()
+        
+        declare function onInit(byref self as ServiceProcess) as integer
+        declare sub onStart(byref self as ServiceProcess)
+        declare sub onStop(byref self as ServiceProcess)
+        
+        _service        as ServiceProcess
+        _child_pid      as uinteger
+    end type
+end namespace

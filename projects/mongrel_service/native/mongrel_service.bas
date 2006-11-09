@@ -27,3 +27,23 @@
 '##################################################################
 
 #include once "mongrel_service.bi"
+
+namespace mongrel_service
+    constructor SingleMongrel()
+    end constructor
+    
+    destructor SingleMongrel()
+    end destructor
+    
+    function SingleMongrel.onInit(byref self as ServiceProcess) as integer
+        dim result as integer
+        
+        return result
+    end function
+    
+    sub SingleMongrel.onStart(byref self as ServiceProcess)
+    end sub
+    
+    sub SingleMongrel.onStop(byref self as ServiceProcess)
+    end sub
+end namespace

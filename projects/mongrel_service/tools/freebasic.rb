@@ -270,17 +270,18 @@ module FreeBASIC
           file compiled_project_file => compiled_form(@main_file)
         end
         
-        # gather resource files
-        resource_files = @sources.select { |rcfile| rcfile =~ /res$|rc$/ }
+        # gather files that are passed "as-is" to the compiler
+        unprocessed_files = @sources.select { |rcfile| rcfile =~ /(res|rc|o|obj)$/ }
         
         @sources.each do |src|
-          # is a resource file?
-          unless resource_files.include?(src)
+          # is a unprocessed file?
+          unless unprocessed_files.include?(src)
             target = compiled_form(src)
             
             # is already in our list of tasks?
             if not Rake::Task.task_defined?(target)
               # if not, compile
+              
               file target => src do
                 sh fbc_compile(src, target)
               end
@@ -294,7 +295,7 @@ module FreeBASIC
         # now the linking process
         file compiled_project_file do |t|
           target = File.join(@build_path, @output_name)
-          sh fbc_link(target, t.prerequisites, resource_files)
+          sh fbc_link(target, t.prerequisites, unprocessed_files)
         end
         
         # add the dependency
