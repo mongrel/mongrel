@@ -231,10 +231,13 @@ module FreeBASIC
           # now the sources files
           # avoid attempt to remove the file two times (this is a bug in Rake)
           @sources.each do |src|
-            target = compiled_form(src)
-            unless CLOBBER.include?(target)
-              CLOBBER.include(target)
-              rm target rescue nil
+            # exclude compiled source files (c obj).
+            unless src =~ /o$/
+              target = compiled_form(src)
+              unless CLOBBER.include?(target)
+                CLOBBER.include(target)
+                rm target rescue nil
+              end
             end
           end
         end
