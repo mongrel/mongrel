@@ -304,7 +304,7 @@ extern "C" int send_break(DWORD dwPid)
     rv=GetCtrlRoutineAddress();
     _JumpIfError(rv, error, "GetCtrlRoutineAddress");
 
-    printf("Sending signal to process %d...\n", dwPid);
+    // printf("Sending signal to process %d...\n", dwPid);
     rv=AdvancedOpenProcess(dwPid, &hRemoteProc);
     _JumpIfErrorStr(rv, error, "AdvancedOpenProcess", dwPid);
 
