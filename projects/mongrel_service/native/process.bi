@@ -35,9 +35,5 @@
 '# extern "C" from send_signal library
 declare function send_break cdecl alias "send_break" (byval as uinteger) as integer
 
-namespace fb
-    namespace process
-        '# spawn(cmdline) => PID
-        declare function spawn(byref as string) as uinteger
-    end namespace
-end namespace
+'# spawn(cmdline) => PID
+declare function spawn(byref as string) as uinteger

@@ -32,76 +32,71 @@
 
 #include once "process.bi"
 
-namespace fb
-    namespace process
-        function spawn(byref cmdLine as string) as uinteger
-            dim result as uinteger
-            dim as HANDLE StdInRd, StdOutRd, StdErrRd
-            dim as HANDLE StdInWr, StdOutWr, StdErrWr
-            
-            dim pi as PROCESS_INFORMATION
-            dim si as STARTUPINFO
-            dim sa as SECURITY_ATTRIBUTES
-            
-            '// INIT
-            with sa
-                .nLength = sizeof( sa )
-                .bInheritHandle = TRUE
-                .lpSecurityDescriptor = NULL
-            end with
-            
-            '# Create the pipes
-            '# StdIn
-            if (CreatePipe( @StdInRd, @StdInWr, @sa, 0 ) = 0) then
-                print "Error creating StdIn pipes."
-                end 0
-            end if
-            
-            '# StdOut
-            if (CreatePipe( @StdOutRd, @StdOutWr, @sa, 0 ) = 0) then
-                print "Error creating StdOut pipes."
-                end 0
-            end if
-            
-            '# StdErr
-            if (CreatePipe( @StdErrRd, @StdErrWr, @sa, 0 ) = 0) then
-                print "Error creating StdErr pipes."
-                end 0
-            end if
-        
-            '# Ensure the handles to the pipe are not inherited.
-            SetHandleInformation( StdInWr, HANDLE_FLAG_INHERIT, 0)
-            SetHandleInformation( StdOutRd, HANDLE_FLAG_INHERIT, 0)
-            SetHandleInformation( StdErrRd, HANDLE_FLAG_INHERIT, 0)
-        
-            '# Set the Std* handles ;-)
-            with si
-                .cb = sizeof( si )
-                .hStdError = StdErrWr
-                .hStdOutput = StdOutWr
-                .hStdInput = StdInRd
-                .dwFlags = STARTF_USESTDHANDLES
-            end with
-            '// INIT
-            
-            if (CreateProcess( NULL, _
-                                StrPtr( cmdLine ), _
-                                NULL, _
-                                NULL, _
-                                TRUE, _
-                                CREATE_NEW_PROCESS_GROUP or DETACHED_PROCESS, _
-                                NULL, _
-                                NULL, _
-                                @si, _
-                                @pi ) = 0) then
-            else
-                CloseHandle( pi.hProcess )
-                CloseHandle( pi.hThread )
-                result = pi.dwProcessId
-            end if
-            
-            return result
-        end function
-    end namespace
-end namespace
+function spawn(byref cmdLine as string) as uinteger
+    dim result as uinteger
+    dim as HANDLE StdInRd, StdOutRd, StdErrRd
+    dim as HANDLE StdInWr, StdOutWr, StdErrWr
+    
+    dim pi as PROCESS_INFORMATION
+    dim si as STARTUPINFO
+    dim sa as SECURITY_ATTRIBUTES
+    
+    '// INIT
+    with sa
+        .nLength = sizeof( sa )
+        .bInheritHandle = TRUE
+        .lpSecurityDescriptor = NULL
+    end with
+    
+    '# Create the pipes
+    '# StdIn
+    if (CreatePipe( @StdInRd, @StdInWr, @sa, 0 ) = 0) then
+        print "Error creating StdIn pipes."
+        end 0
+    end if
+    
+    '# StdOut
+    if (CreatePipe( @StdOutRd, @StdOutWr, @sa, 0 ) = 0) then
+        print "Error creating StdOut pipes."
+        end 0
+    end if
+    
+    '# StdErr
+    if (CreatePipe( @StdErrRd, @StdErrWr, @sa, 0 ) = 0) then
+        print "Error creating StdErr pipes."
+        end 0
+    end if
 
+    '# Ensure the handles to the pipe are not inherited.
+    SetHandleInformation( StdInWr, HANDLE_FLAG_INHERIT, 0)
+    SetHandleInformation( StdOutRd, HANDLE_FLAG_INHERIT, 0)
+    SetHandleInformation( StdErrRd, HANDLE_FLAG_INHERIT, 0)
+
+    '# Set the Std* handles ;-)
+    with si
+        .cb = sizeof( si )
+        .hStdError = StdErrWr
+        .hStdOutput = StdOutWr
+        .hStdInput = StdInRd
+        .dwFlags = STARTF_USESTDHANDLES
+    end with
+    '// INIT
+    
+    if (CreateProcess( NULL, _
+                        StrPtr( cmdLine ), _
+                        NULL, _
+                        NULL, _
+                        TRUE, _
+                        CREATE_NEW_PROCESS_GROUP or DETACHED_PROCESS, _
+                        NULL, _
+                        NULL, _
+                        @si, _
+                        @pi ) = 0) then
+    else
+        CloseHandle( pi.hProcess )
+        CloseHandle( pi.hThread )
+        result = pi.dwProcessId
+    end if
+    
+    return result
+end function
