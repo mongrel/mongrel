@@ -14,7 +14,7 @@ setup_clean ["pkg", "lib/*.bundle", "*.gem", ".config"]
 setup_rdoc ['README', 'LICENSE', 'COPYING', 'lib/**/*.rb', 'doc/**/*.rdoc']
 
 desc "Does a full compile, test run"
-task :default => [:test, :package]
+task :default => [:test, :compile, :package]
 
 version="0.3.0"
 name="mongrel_service"
@@ -43,24 +43,34 @@ task :uninstall => [:clean] do
   sh %{gem uninstall #{name}}
 end
 
+# too hackish, but get the job done, compile the ugly c code.
+task :compile_c do
+  sh %{cl /nologo /c native\\send_signal.cpp /Fonative\\send_signal.obj}
+  sh %{lib /nologo native\\send_signal.obj /out:lib\\libsend_signal.a}
+end
+task :compile => :compile_c
+
 # ServiceFB namespace (lib)
 namespace :lib do
   project_task 'servicefb' do
-    lib         'ServiceFB'
-    build_to    'lib'
+    lib       'ServiceFB'
+    build_to  'lib'
 
-    source      'lib/ServiceFB/ServiceFB.bas'
+    define    'SERVICEFB_DEBUG_LOG' if ENV['DEBUG_LIB']
+    source    'lib/ServiceFB/ServiceFB.bas'
   end
   
   project_task 'servicefb_utils' do
     lib       'ServiceFB_Utils'
     build_to  'lib'
-    
+
+    define    'SERVICEFB_DEBUG_LOG' if ENV['DEBUG_LIB']
     source    'lib/ServiceFB/ServiceFB_Utils.bas'
   end
 end
-#add lib namespace to global tasks
-include_projects_of :lib
+# add lib namespace to global tasks
+#include_projects_of :lib
+task :compile => "lib:build"
 
 # mongrel_service (native)
 namespace :native do
@@ -69,15 +79,18 @@ namespace :native do
     build_to    'bin'
     
     main        'native/mongrel_service.bas'
+    source      'native/process.bas'
     
     # including the precompiled file show warnings when linking with
     # ld, due special m$ directives in the obj file
     # will solve that later, when migrate the asm part of code to gcc
-    source      'native/send_signal.o'
+    # source      'native/send_signal.o'
     
     lib_path    'lib'
     library     'ServiceFB', 'ServiceFB_Utils'
-    library       'user32', 'advapi32', 'psapi'
+    library     'send_signal'
+    library     'user32', 'advapi32', 'psapi'
   end
 end
-include_projects_of :native
+#include_projects_of :native
+task :compile => "native:build"

@@ -30,31 +30,14 @@
 '# 
 '##################################################################
 
-#define SERVICEFB_INCLUDE_UTILS
-#include once "lib/ServiceFB/ServiceFB.bi"
+#include once "windows.bi"
 
-namespace mongrel_service
-    using fb.svc
-    using fb.svc.utils
-    
-    declare function single_onInit(byref as ServiceProcess) as integer
-    declare sub single_onStart(byref as ServiceProcess)
-    declare sub single_onStop(byref as ServiceProcess)
-    
-    '# SingleMongrel
-    type SingleMongrel
-        declare constructor()
-        declare destructor()
-        
-        '# TODO: replace for inheritance here
-        'declare function onInit() as integer
-        'declare sub onStart()
-        'declare sub onStop()
-        
-        __service       as ServiceProcess
-        __child_pid     as uinteger
-    end type
-    
-    '# TODO: replace with inheritance here
-    dim shared single_mongrel as SingleMongrel ptr
+'# extern "C" from send_signal library
+declare function send_break cdecl alias "send_break" (byval as uinteger) as integer
+
+namespace fb
+    namespace process
+        '# spawn(cmdline) => PID
+        declare function spawn(byref as string) as uinteger
+    end namespace
 end namespace
