@@ -11,22 +11,11 @@
 '#  in the same terms as mongrel, please review the mongrel license at
 '#  http://mongrel.rubyforge.org/license.html
 '#  
-'#  Louis Thomas licensing:
-'#  http://www.latenighthacking.com/projects/lnhfslicense.html
-'#  
 '##################################################################
 
 '##################################################################
 '# Requirements:
 '# - FreeBASIC 0.17, Win32 CVS Build (as for November 09, 2006).
-'# 
-'# SendSignal from Louis Thomas is included in the repository
-'# in a pre-compiled form (also included the modified source code).
-'# The C code is ugly as hell, but get the job done.
-'#
-'# Compile instructions:
-'# cl /c native\send_signal.cpp /Fonative\send_signal.obj
-'# lib native\send_signal.obj /out:lib\libsend_signal.a
 '# 
 '##################################################################
 

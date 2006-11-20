@@ -11,32 +11,38 @@
 '#  in the same terms as mongrel, please review the mongrel license at
 '#  http://mongrel.rubyforge.org/license.html
 '#  
-'#  Louis Thomas licensing:
-'#  http://www.latenighthacking.com/projects/lnhfslicense.html
-'#  
 '##################################################################
 
 '##################################################################
 '# Requirements:
 '# - FreeBASIC 0.17, Win32 CVS Build (as for November 09, 2006).
 '# 
-'# SendSignal from Louis Thomas is included in the repository
-'# in a pre-compiled form (also included the modified source code).
-'# The C code is ugly as hell, but get the job done.
-'#
-'# Compile instructions:
-'# cl /c native\send_signal.cpp /Fonative\send_signal.obj
-'# lib native\send_signal.obj /out:lib\libsend_signal.a
-'# 
 '##################################################################
+
+#ifndef __Process_bi__
+#define __Process_bi__
 
 #include once "windows.bi"
 
-'# extern "C" from send_signal library
-declare function send_break cdecl alias "send_break" (byval as uinteger) as integer
-declare function GetCtrlRoutineAddress cdecl alias "GetCtrlRoutineAddress" () as uinteger
+namespace fb
+namespace process
+    '# fb.process functions that allow creation/graceful termination
+    '# of child process.
+    
+    '# Spawn(cmdline) will try to create a new process, monitor
+    '# if it launched successfuly (5 seconds) and then return the
+    '# new children PID (Process IDentification) or 0 in case of problems
+    declare function Spawn(byref as string) as uinteger
+    
+    '# Terminate(PID) will hook the special console handler (_child_console_handler)
+    '# and try sending CTRL_C_EVENT, CTRL_BREAK_EVENT and TerminateProcess
+    '# in case of the first two fails.
+    declare function Terminate(byval as uinteger) as BOOL
+    
+    '# Special hook used to avoid the process calling Terminate()
+    '# respond to CTRL_*_EVENTS when terminating child process
+    declare function _child_console_handler(byval as DWORD) as BOOL
+end namespace '# fb.process
+end namespace '# fb
 
-'# spawn(cmdline) => PID
-declare function spawn(byref as string) as uinteger
-declare function console_handler(byval as DWORD) as BOOL
-declare function terminate_spawned(byval as uinteger) as BOOL
+#endif '# __Process_bi__

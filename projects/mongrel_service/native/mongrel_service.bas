@@ -11,63 +11,20 @@
 '#  in the same terms as mongrel, please review the mongrel license at
 '#  http://mongrel.rubyforge.org/license.html
 '#  
-'#  Louis Thomas licensing:
-'#  http://www.latenighthacking.com/projects/lnhfslicense.html
-'#  
 '##################################################################
 
 '##################################################################
 '# Requirements:
 '# - FreeBASIC 0.17, Win32 CVS Build (as for November 09, 2006).
 '# 
-'# SendSignal from Louis Thomas is included in the repository
-'# in a pre-compiled form (also included the modified source code).
-'# The C code is ugly as hell, but get the job done.
-'#
-'# Compile instructions:
-'# cl /c native\send_signal.cpp /Fonative\send_signal.obj
-'# lib native\send_signal.obj /out:lib\libsend_signal.a
-'# 
 '##################################################################
 
 #include once "mongrel_service.bi"
+#define DEBUG_LOG_FILE EXEPATH + "\mongrel_service.log"
+#include once "_debug.bi"
 
 namespace mongrel_service
-    Function GetErrorString(ByVal Code As UInteger, ByVal MaxLen As UShort = 1024) As String
-        Dim ErrorString         As Any PTR
-        Dim sError              As String
-        Dim lLen                As Integer
-        
-        lLen = FormatMessage   (FORMAT_MESSAGE_FROM_SYSTEM Or _
-                                FORMAT_MESSAGE_ALLOCATE_BUFFER, _
-                                NULL, _
-                                Code, _
-                                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), _
-                                @ErrorString, _
-                                MaxLen, _
-                                NULL)
-
-        If (ErrorString <> 0) Then
-        
-            sError = Space(lLen - 2)
-            CopyMemory(StrPtr(sError), ByVal ErrorString, lLen-2)
-            
-            LocalFree(ErrorString)
-        End If
-        
-        Return sError
-    End Function
-
-    sub debug(byref message as string)
-        dim handle as integer
-        
-        handle = freefile
-        open EXEPATH + "\service.log" for append as #handle
-        
-        print #handle, message
-        
-        close #handle
-    end sub
+    using fb.process
     
     constructor SingleMongrel()
         with this.__service
@@ -90,21 +47,41 @@ namespace mongrel_service
     
     function single_onInit(byref self as ServiceProcess) as integer
         dim result as integer
+        dim mongrel_cmd as string
+        
         debug("single_onInit()")
+        
+        '# ruby.exe must be in the path, which we guess is already there.
+        '# because mongrel_service executable (.exe) is located in the same
+        '# folder than mongrel_rails ruby script, we complete the path with
+        '# EXEPATH + "\mongrel_rails" to make it work.
+        mongrel_cmd = "ruby.exe " + EXEPATH + "\mongrel_rails start"
         
         '# due lack of inheritance, we use single_mongrel_ref as pointer to 
         '# SingleMongrel instance. now we should call StillAlive
         self.StillAlive()
         if (len(self.commandline) > 0) then
+            '# fix commandline, it currently contains params to be passed to
+            '# mongrel_rails, and not ruby.exe nor the script to be run.
+            self.commandline = mongrel_cmd + " " + self.commandline
+            
+            '# now launch the child process
             debug("starting child process with cmdline: " + self.commandline)
             single_mongrel_ref->__child_pid = 0
-            single_mongrel_ref->__child_pid = spawn(self.commandline)
+            single_mongrel_ref->__child_pid = Spawn(self.commandline)
             self.StillAlive()
-            debug("child process pid: " + str(single_mongrel_ref->__child_pid))
+            
+            '# check if pid is valid
+            if (single_mongrel_ref->__child_pid > 0) then
+                '# it worked
+                debug("child process pid: " + str(single_mongrel_ref->__child_pid))
+                result = not FALSE
+            end if
+        else
+            '# if no param, no service!
+            debug("no parameters was passed to this service!")
+            result = FALSE
         end if
-        
-        '# set as success, but we must evaluate this first!
-        result = -1
         
         debug("single_onInit() done")
         return result
@@ -127,10 +104,11 @@ namespace mongrel_service
         if not (single_mongrel_ref->__child_pid = 0) then
             debug("trying to kill pid: " + str(single_mongrel_ref->__child_pid))
             'if not (send_break(single_mongrel_ref->__child_pid) = 0) then
-            if not (terminate_spawned(single_mongrel_ref->__child_pid) = TRUE) then
-                debug("send_break() reported a problem when terminating process " + str(single_mongrel_ref->__child_pid))
+            if not (Terminate(single_mongrel_ref->__child_pid) = TRUE) then
+                debug("Terminate() reported a problem when terminating process " + str(single_mongrel_ref->__child_pid))
             else
                 debug("child process terminated with success.")
+                single_mongrel_ref->__child_pid = 0
             end if
         end if
         
@@ -142,18 +120,6 @@ namespace mongrel_service
         dim host as ServiceHost
         dim ctrl as ServiceController = ServiceController("Mongrel Win32 Service", "version 0.3.0", _
                                                             "(c) 2006 The Mongrel development team.")
-        
-        '# allocate a new console (this is for services
-        if (AllocConsole() = 0) then
-            debug("success in AllocConsole()")
-        else
-            debug("AllocConsole failed, error: " + GetErrorString(GetLastError()))
-        end if
-        
-        '# we need to get the Console hook prior adding our handler.
-        if not (GetCtrlRoutineAddress() = 0) then
-            debug("error GetCtrlRoutineAddress()")
-        end if
         
         '# add SingleMongrel (service)
         host.Add(simple.__service)

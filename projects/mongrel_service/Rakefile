@@ -43,14 +43,6 @@ task :uninstall => [:clean] do
   sh %{gem uninstall #{name}}
 end
 
-# too hackish, but get the job done, compile the ugly c code.
-task :compile_c do
-  sh %{cl /nologo /Zl /c native\\send_signal.cpp /Fonative\\send_signal.obj}
-  sh %{lib /nologo native\\send_signal.obj /out:lib\\libsend_signal.a}
-end
-unless File.exist?("lib/libsend_signal.a")
-  task :compile => :compile_c 
-end
 
 # ServiceFB namespace (lib)
 namespace :lib do
@@ -73,12 +65,15 @@ end
 # add lib namespace to global tasks
 #include_projects_of :lib
 task :compile => "lib:build"
+task :clobber => "lib:clobber"
 
 # mongrel_service (native)
 namespace :native do
   project_task  'mongrel_service' do
     executable  'mongrel_service'
     build_to    'bin'
+    
+    define      'DEBUG_LOG' if ENV['DEBUG_LOG']
     
     main        'native/mongrel_service.bas'
     source      'native/process.bas'
@@ -90,9 +85,10 @@ namespace :native do
     
     lib_path    'lib'
     library     'ServiceFB', 'ServiceFB_Utils'
-    library     'send_signal'
+    # library     'send_signal'
     library     'user32', 'advapi32', 'psapi'
   end
 end
 #include_projects_of :native
 task :compile => "native:build"
+task :clobber => "native:clobber"
