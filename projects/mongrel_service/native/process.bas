@@ -32,6 +32,17 @@
 
 #include once "process.bi"
 
+private sub _dprint(byref message as string)
+    dim handle as integer
+    
+    handle = freefile
+    open EXEPATH + "\process.log" for append as #handle
+    
+    print #handle, message
+    
+    close #handle
+end sub
+
 function spawn(byref cmdLine as string) as uinteger
     dim result as uinteger
     dim as HANDLE StdInRd, StdOutRd, StdErrRd
@@ -51,19 +62,19 @@ function spawn(byref cmdLine as string) as uinteger
     '# Create the pipes
     '# StdIn
     if (CreatePipe( @StdInRd, @StdInWr, @sa, 0 ) = 0) then
-        print "Error creating StdIn pipes."
+        _dprint("Error creating StdIn pipes.")
         end 0
     end if
     
     '# StdOut
     if (CreatePipe( @StdOutRd, @StdOutWr, @sa, 0 ) = 0) then
-        print "Error creating StdOut pipes."
+        _dprint("Error creating StdOut pipes.")
         end 0
     end if
     
     '# StdErr
     if (CreatePipe( @StdErrRd, @StdErrWr, @sa, 0 ) = 0) then
-        print "Error creating StdErr pipes."
+        _dprint("Error creating StdErr pipes.")
         end 0
     end if
 
@@ -82,21 +93,54 @@ function spawn(byref cmdLine as string) as uinteger
     end with
     '// INIT
     
-    if (CreateProcess( NULL, _
-                        StrPtr( cmdLine ), _
+    if (CreateProcess(NULL, _
+                        StrPtr(cmdLine), _
                         NULL, _
                         NULL, _
                         TRUE, _
-                        CREATE_NEW_PROCESS_GROUP or DETACHED_PROCESS, _
+                        CREATE_NEW_PROCESS_GROUP, _                 '// CREATE_NEW_PROCESS_GROUP or DETACHED_PROCESS, _
                         NULL, _
                         NULL, _
                         @si, _
-                        @pi ) = 0) then
+                        @pi) = 0) then
+        _dprint("Error in CreateProcess (" + str(GetLastError()))
     else
-        CloseHandle( pi.hProcess )
-        CloseHandle( pi.hThread )
+        CloseHandle(pi.hProcess)
+        CloseHandle(pi.hThread)
         result = pi.dwProcessId
+        _dprint("Success in CreateProcess, PID " + str(result))
     end if
+    
+    return result
+end function
+
+private function tricky_console_handler(byval dwCtrlType as DWORD) as BOOL
+    _dprint("tricky_console_handler got dwCtrlType = " + str(dwCtrlType))
+    return (dwCtrlType = CTRL_C_EVENT)
+end function
+
+public function terminate_spawned(byval pid as uinteger) as BOOL
+    dim result as BOOL
+    
+    result = FALSE
+    
+    '# hook custom console_handler
+    SetConsoleCtrlHandler(@tricky_console_handler, TRUE)
+    
+    '# fire CTRL_C_EVENT to all the children 
+    if not (GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) = 0) then
+        '# it worked
+        _dprint("GenerateConsoleCtrlEvent worked.")
+        result = TRUE
+    else
+        _dprint("GenerateConsoleCtrlEvent failed, error " + str(GetLastError()))
+    end if
+    
+    '# we should check here if the pid no longer exist.
+    '# ...
+    
+    '# remove our custom console handler
+    SetConsoleCtrlHandler(@tricky_console_handler, FALSE)
     
     return result
 end function

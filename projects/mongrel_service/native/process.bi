@@ -34,6 +34,9 @@
 
 '# extern "C" from send_signal library
 declare function send_break cdecl alias "send_break" (byval as uinteger) as integer
+declare function GetCtrlRoutineAddress cdecl alias "GetCtrlRoutineAddress" () as uinteger
 
 '# spawn(cmdline) => PID
 declare function spawn(byref as string) as uinteger
+declare function console_handler(byval as DWORD) as BOOL
+declare function terminate_spawned(byval as uinteger) as BOOL

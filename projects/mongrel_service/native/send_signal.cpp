@@ -93,28 +93,37 @@ RETVAL StartRemoteThread(HANDLE hRemoteProc, DWORD dwEntryPoint){
     HANDLE hRemoteThread=NULL;
 
     // inject the thread
+    printf("creating remote thread\n");
     hRemoteThread=CreateRemoteThread(hRemoteProc, NULL, 0, (LPTHREAD_START_ROUTINE)dwEntryPoint, (void *)CTRL_C_EVENT, CREATE_SUSPENDED, NULL);
     if (NULL==hRemoteThread) {
+        printf("cannot create thread\n");
         _JumpLastError(rv, error, "CreateRemoteThread");
     }
 
     // wake up the thread
+    printf("wake up thread\n");
     if (-1==ResumeThread(hRemoteThread)) {
+        printf("cannot wakeup thread\n");
         _JumpLastError(rv, error, "ResumeThread");
     }
 
     // wait for the thread to finish
+    printf("waiting for signal...\n");
     if (WAIT_OBJECT_0!=WaitForSingleObject(hRemoteThread, INFINITE)) {
+        printf("error waitforsingleobject\n");
         _JumpLastError(rv, error, "WaitForSingleObject");
     }
 
     // find out what happened
+    printf("get exit code.\n");
     if (!GetExitCodeThread(hRemoteThread, (DWORD *)&rv)) {
+        printf("GetExitCodeThread\n");
         _JumpLastError(rv, error, "GetExitCodeThread");
     }
 
+    printf("GetExitCodeThread = %d\n", rv);
     if (STATUS_CONTROL_C_EXIT==rv) {
-        // printf("Target process was killed.\n");
+        printf("Target process was killed.\n");
         rv=EXIT_OK;
     }
 
@@ -253,7 +262,7 @@ BOOL WINAPI MyHandler(DWORD dwCtrlType) {
 
 
 //--------------------------------------------------------------------
-RETVAL GetCtrlRoutineAddress(void) {
+extern "C" RETVAL GetCtrlRoutineAddress(void) {
     RETVAL rv=EXIT_OK;
 
     // must be cleaned up
@@ -300,14 +309,20 @@ extern "C" int send_break(DWORD dwPid)
     
     HANDLE hRemoteProc=NULL;
     HANDLE hRemoteProcToken=NULL;
-
-    rv=GetCtrlRoutineAddress();
-    _JumpIfError(rv, error, "GetCtrlRoutineAddress");
-
-    // printf("Sending signal to process %d...\n", dwPid);
+    
+    printf("send_break pid: %d\n", dwPid);
+    
+    if (g_dwCtrlRoutineAddr==NULL) {
+        printf("getting CtrlRoutineAddress()...\n");
+        rv=GetCtrlRoutineAddress();
+        _JumpIfError(rv, error, "GetCtrlRoutineAddress");
+    }
+    
+    printf("Sending signal to process %d...\n", dwPid);
     rv=AdvancedOpenProcess(dwPid, &hRemoteProc);
     _JumpIfErrorStr(rv, error, "AdvancedOpenProcess", dwPid);
 
+    printf("Start remote thread...\n");
     rv=StartRemoteThread(hRemoteProc, g_dwCtrlRoutineAddr);
     _JumpIfError(rv, error, "StartRemoteThread");
 

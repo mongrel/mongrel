@@ -32,6 +32,7 @@
 
 #define SERVICEFB_INCLUDE_UTILS
 #include once "lib/ServiceFB/ServiceFB.bi"
+#include once "process.bi"
 
 namespace mongrel_service
     using fb.svc
@@ -56,5 +57,5 @@ namespace mongrel_service
     end type
     
     '# TODO: replace with inheritance here
-    dim shared single_mongrel as SingleMongrel ptr
+    dim shared single_mongrel_ref as SingleMongrel ptr
 end namespace
