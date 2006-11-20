@@ -45,10 +45,12 @@ end
 
 # too hackish, but get the job done, compile the ugly c code.
 task :compile_c do
-  sh %{cl /nologo /c native\\send_signal.cpp /Fonative\\send_signal.obj}
+  sh %{cl /nologo /Zl /c native\\send_signal.cpp /Fonative\\send_signal.obj}
   sh %{lib /nologo native\\send_signal.obj /out:lib\\libsend_signal.a}
 end
-task :compile => :compile_c
+unless File.exist?("lib/libsend_signal.a")
+  task :compile => :compile_c 
+end
 
 # ServiceFB namespace (lib)
 namespace :lib do
