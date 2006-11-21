@@ -31,6 +31,9 @@ namespace mongrel_service
             .name = "single"
             .description = "Mongrel Single Process service"
             
+            '# disabling shared process
+            .shared_process = FALSE
+            
             '# TODO: fix inheritance here
             .onInit = @single_onInit
             .onStart = @single_onStart

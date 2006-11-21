@@ -16,33 +16,8 @@ setup_rdoc ['README', 'LICENSE', 'COPYING', 'lib/**/*.rb', 'doc/**/*.rdoc']
 desc "Does a full compile, test run"
 task :default => [:test, :compile, :package]
 
-version="0.3.0"
-name="mongrel_service"
-
-setup_gem(name, version) do |spec|
-  spec.summary = "Mongrel Native Win32 Service Plugin for Rails"
-  spec.description = "This plugin offer native win32 services for rails, powered by Mongrel."
-  spec.author="Luis Lavena"
-  
-  # added mongrel_service executable
-  spec.executables = ["mongrel_service"]
-  
-  spec.add_dependency('gem_plugin', '>= 0.2.1')
-  spec.add_dependency('mongrel', '>= 0.3.12.4')
-  spec.add_dependency('win32-service', '>= 0.5.0')
-
-  spec.files += Dir.glob("resources/**/*")
-end
-
-
-task :install => [:test, :package] do
-  sh %{gem install pkg/#{name}-#{version}.gem}
-end
-
-task :uninstall => [:clean] do
-  sh %{gem uninstall #{name}}
-end
-
+GEM_VERSION = "0.3.0"
+GEM_NAME = "mongrel_service"
 
 # ServiceFB namespace (lib)
 namespace :lib do
@@ -92,3 +67,31 @@ end
 #include_projects_of :native
 task :compile => "native:build"
 task :clobber => "native:clobber"
+
+
+setup_gem(GEM_NAME, GEM_VERSION) do |spec|
+  spec.summary = "Mongrel Native Win32 Service Plugin for Rails"
+  spec.description = "This plugin offer native win32 services for rails, powered by Mongrel."
+  spec.author = "Luis Lavena"
+  spec.platform = Gem::Platform::WIN32
+  
+  spec.files -= Dir["bin/**/*"]
+  spec.files -= Dir["**/*.{o,a}"]
+  spec.files += Dir["native/**/*.{bas,bi}"]
+  spec.files += ["bin/mongrel_service.exe"]
+  
+  spec.add_dependency('gem_plugin', '>= 0.2.1')
+  spec.add_dependency('mongrel', '>= 0.3.14')
+  spec.add_dependency('win32-service', '>= 0.5.0')
+  
+  spec.files += Dir.glob("resources/**/*")
+end
+
+task :install => [:test, :package] do
+  sh %{gem install pkg/#{name}-#{version}.gem}
+end
+
+task :uninstall => [:clean] do
+  sh %{gem uninstall #{name}}
+end
+
