@@ -198,6 +198,7 @@ module FreeBASIC
         cmdline << "fbc"
         cmdline << "-c #{source}"
         cmdline << "-o #{target}"
+        cmdline << "-mt"
         cmdline << "-m #{main}" unless main.nil?
         cmdline << @defines.collect { |defname| "-d #{defname}" }
         cmdline << @search_path.collect { |path| "-i #{path}" }
@@ -207,6 +208,7 @@ module FreeBASIC
       def fbc_link(target, files, extra_files = [])
         cmdline = []
         cmdline << "fbc"
+        cmdline << "-mt"
         cmdline << "-#{@type.to_s}" unless @type == :executable
         cmdline << "-x #{target}"
         cmdline << files << extra_files
