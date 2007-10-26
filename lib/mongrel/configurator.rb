@@ -55,21 +55,30 @@ module Mongrel
     def change_privilege(user, group)
       begin
         if group && user
-          log "Initializing groups for #{user}:#{group}."
+          log "Initializing groups for #{user.inspect}:#{group.inspect}."
           Process.initgroups(user, Etc.getgrnam(group).gid)
         end
         
         if group
-          log "Changing group to #{group}."
-          Process::GID.change_privilege(Etc.getgrnam(group).gid)
+          if group && Etc.getgrnam(group).gid != Process.egid
+            log "Changing group to #{group.inspect}."
+            Process::GID.change_privilege(Etc.getgrnam(group).gid)
+          else
+            log "Already running as group #{group.inspect}"
+          end
         end
 
         if user
-          log "Changing user to #{user}." 
-          Process::UID.change_privilege(Etc.getpwnam(user).uid)
+          if user && Etc.getpwnam(user).uid != Process.euid
+            log "Changing user to #{user.inspect}." 
+            Process::UID.change_privilege(Etc.getpwnam(user).uid)
+          else
+            log "Already running as user #{user.inspect}"
+          end
         end
-      rescue Errno::EPERM
-        log "FAILED to change user:group #{user}:#{group}: #$!"
+      rescue Errno::EPERM => e
+        log "Couldn't change user and group to #{user.inspect}:#{group.inspect}: #{e.to_s}."
+        log "Mongrel failed to start."
         exit 1
       end
     end
