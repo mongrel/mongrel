@@ -60,7 +60,7 @@ module Mongrel
         end
         
         if group
-          if group && Etc.getgrnam(group).gid != Process.egid
+          if Etc.getgrnam(group).gid != Process.egid
             log "Changing group to #{group.inspect}."
             Process::GID.change_privilege(Etc.getgrnam(group).gid)
           else
@@ -69,7 +69,7 @@ module Mongrel
         end
 
         if user
-          if user && Etc.getpwnam(user).uid != Process.euid
+          if Etc.getpwnam(user).uid != Process.euid
             log "Changing user to #{user.inspect}." 
             Process::UID.change_privilege(Etc.getpwnam(user).uid)
           else
