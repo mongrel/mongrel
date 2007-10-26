@@ -38,7 +38,7 @@ module Mongrel
     attr_reader :needs_restart
 
     # You pass in initial defaults and then a block to continue configuring.
-    def initialize(defaults={}, &blk)
+    def initialize(defaults={}, &block)
       @listener = nil
       @listener_name = nil
       @listeners = {}
@@ -46,12 +46,12 @@ module Mongrel
       @needs_restart = false
       @pid_file = defaults[:pid_file]
 
-      if blk
-        cloaker(&blk).bind(self).call
+      if block
+        cloaker(&block).bind(self).call
       end
     end
 
-    # Change privilege of the process to specified user and group.
+    # Change privileges of the process to specified user and group.
     def change_privilege(user, group)
       begin
         uid, gid = Process.euid, Process.egid
@@ -105,9 +105,9 @@ module Mongrel
     end
 
     # Do not call this.  You were warned.
-    def cloaker(&blk)
+    def cloaker(&block)
       cloaking_class.class_eval do
-        define_method :cloaker_, &blk
+        define_method :cloaker_, &block
         meth = instance_method( :cloaker_ )
         remove_method :cloaker_
         meth
@@ -135,7 +135,7 @@ module Mongrel
     # * :user => User to change to, must have :group as well.
     # * :group => Group to change to, must have :user as well.
     #
-    def listener(options={},&blk)
+    def listener(options={},&block)
       raise "Cannot call listener inside another listener block." if (@listener or @listener_name)
       ops = resolve_defaults(options)
       ops[:num_processors] ||= 950
@@ -151,8 +151,8 @@ module Mongrel
       end
 
       # Does the actual cloaking operation to give the new implicit self.
-      if blk
-        cloaker(&blk).bind(self).call
+      if block
+        cloaker(&block).bind(self).call
       end
 
       # all done processing this listener setup, reset implicit variables
