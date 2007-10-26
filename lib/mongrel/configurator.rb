@@ -58,21 +58,15 @@ module Mongrel
         target_uid = Etc.getpwnam(user).uid if user
         target_gid = Etc.getgrnam(group).gid if group
 
-        if group and user and (uid != target_uid or gid != target_gid)
+        if uid != target_uid or gid != target_gid
           log "Initiating groups for #{user.inspect}:#{group.inspect}."
           Process.initgroups(user, target_id)
-        end
         
-        if group and gid != target_gid
-            log "Changing group to #{group.inspect}."
-            Process::GID.change_privilege(target_gid)
-        end
+          log "Changing group to #{group.inspect}."
+          Process::GID.change_privilege(target_gid)
 
-        if user and uid != target_uid
-          if Etc.getpwnam(user).uid != Process.euid
-            log "Changing user to #{user.inspect}." 
-            Process::UID.change_privilege(target_uid)
-          end
+          log "Changing user to #{user.inspect}." 
+          Process::UID.change_privilege(target_uid)
         end
       rescue Errno::EPERM => e
         log "Couldn't change user and group to #{user.inspect}:#{group.inspect}: #{e.to_s}."
