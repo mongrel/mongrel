@@ -54,26 +54,24 @@ module Mongrel
     # Change privilege of the process to specified user and group.
     def change_privilege(user, group)
       begin
-        if group && user
-          log "Initializing groups for #{user.inspect}:#{group.inspect}."
-          Process.initgroups(user, Etc.getgrnam(group).gid)
+        uid, gid = Process.euid, Process.egid
+        target_uid = Etc.getpwnam(user).uid if user
+        target_gid = Etc.getgrnam(group).gid if group
+
+        if group and user and (uid != target_uid or gid != target_gid)
+          log "Initiating groups for #{user.inspect}:#{group.inspect}."
+          Process.initgroups(user, target_id)
         end
         
-        if group
-          if Etc.getgrnam(group).gid != Process.egid
+        if group and gid != target_gid
             log "Changing group to #{group.inspect}."
-            Process::GID.change_privilege(Etc.getgrnam(group).gid)
-          else
-            log "Already running as group #{group.inspect}"
-          end
+            Process::GID.change_privilege(target_gid)
         end
 
-        if user
+        if user and uid != target_uid
           if Etc.getpwnam(user).uid != Process.euid
             log "Changing user to #{user.inspect}." 
-            Process::UID.change_privilege(Etc.getpwnam(user).uid)
-          else
-            log "Already running as user #{user.inspect}"
+            Process::UID.change_privilege(target_uid)
           end
         end
       rescue Errno::EPERM => e
