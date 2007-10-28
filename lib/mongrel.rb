@@ -123,7 +123,7 @@ module Mongrel
     REQUEST_URI='REQUEST_URI'.freeze
     REQUEST_PATH='REQUEST_PATH'.freeze
 
-    MONGREL_VERSION="1.0.2".freeze
+    MONGREL_VERSION="1.0.4".freeze
 
     MONGREL_TMP_BASE="mongrel".freeze
 
