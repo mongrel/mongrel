@@ -53,12 +53,8 @@ end
 case RUBY_PLATFORM
 when /mswin/
   filename = "lib/http11.so"
-  file filename do
-    Dir.chdir("ext/http11") do 
-      ruby "extconf.rb"
-      system(PLATFORM =~ /mswin/ ? 'nmake' : 'make')
-    end
-    move_extensions
+  file filename do    
+    cp "#{file}.win32", file
   end 
   task :compile => [filename]
 end
