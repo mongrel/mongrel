@@ -54,7 +54,7 @@ case RUBY_PLATFORM
 when /mswin/
   filename = "lib/http11.so"
   file filename do    
-    cp "#{filename}.win32", file
+    cp "#{filename}.win32", filename
   end 
   task :compile => [filename]
 end
