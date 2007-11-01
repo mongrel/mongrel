@@ -1,13 +1,13 @@
 
 require 'rubygems'
-gem 'echoe', '>=2.6.4'
+gem 'echoe', '>=2.7'
 require 'echoe'
 
 e = Echoe.new("mongrel") do |p|
   p.summary = "A small fast HTTP library and server that runs Rails, Camping, Nitro and Iowa apps."
   p.author ="Zed A. Shaw"
-  p.clean_pattern = ['ext/http11/*.{bundle,so,o,obj,pdb,lib,def,exp}', 'ext/http11/Makefile', 'pkg', 'lib/*.bundle', '*.gem', 'site/output', '.config', 'lib/http11.jar', 'ext/http11_java/classes', 'coverage']
-  p.rdoc_pattern = ['README', 'LICENSE', 'COPYING', 'lib/**/*.rb', 'doc/**/*.rdoc']
+  p.clean_pattern = ['ext/http11/*.{bundle,so,o,obj,pdb,lib,def,exp}', 'lib/*.{bundle,so,o,obj,pdb,lib,def,exp}', 'ext/http11/Makefile', 'pkg', 'lib/*.bundle', '*.gem', 'site/output', '.config', 'lib/http11.jar', 'ext/http11_java/classes', 'coverage']
+  p.rdoc_pattern = ['README', 'LICENSE', 'CHANGELOG', 'COPYING', 'lib/**/*.rb', 'doc/**/*.rdoc']
   p.ignore_pattern = /^(pkg|site|projects|doc|log)|CVS|\.log/
   p.ruby_version = '>= 1.8.4'
   p.dependencies = ['gem_plugin >=0.2.3', 'cgi_multipart_eof_fix >=2.4']
@@ -15,14 +15,14 @@ e = Echoe.new("mongrel") do |p|
   p.need_tar_gz = false
   p.need_tgz = true
 
-  case RUBY_PLATFORM 
-  when /mswin/
-    p.certificate_chain = ['~/gem_certificates/mongrel-public_cert.pem', 
-      '~/gem_certificates/luislavena-mongrel-public_cert.pem']
-  else
+#  case RUBY_PLATFORM 
+#  when /mswin/
+#    p.certificate_chain = ['~/gem_certificates/mongrel-public_cert.pem', 
+#      '~/gem_certificates/luislavena-mongrel-public_cert.pem']
+#  else
     p.certificate_chain = ['~/p/configuration/gem_certificates/mongrel/mongrel-public_cert.pem', 
       '~/p/configuration/gem_certificates/evan_weaver-mongrel-public_cert.pem']
-  end
+#  end
 
   p.eval = proc do  
     case RUBY_PLATFORM
@@ -72,7 +72,7 @@ end
 #### XXX Hack around RubyGems and Echoe for pre-compiled extensions.
 
 def move_extensions
-  Dir["ext/**/*.#{Config::CONFIG['DLEXT']}"].each { |file| cp file, "lib/" }
+  Dir["ext/**/*.#{Config::CONFIG['DLEXT']}"].each { |file| mv file, "lib/" }
 end
 
 def java_classpath_arg 
@@ -118,7 +118,9 @@ end
 def sub_project(project, *targets)
   targets.each do |target|
     Dir.chdir "projects/#{project}" do
-      sh %{rake --trace #{target.to_s} }
+      unless RUBY_PLATFORM =~ /mswin/
+        sh %{rake --trace #{target.to_s} }
+      end
     end
   end
 end
@@ -132,6 +134,7 @@ task :package_all => [:package] do
   sub_project("mongrel_upload_progress", :package)
   sub_project("mongrel_console", :package)
   sub_project("mongrel_cluster", :package)
+  sub_project("mongrel_experimental", :package)
   sub_project("mongrel_service", :package) if RUBY_PLATFORM =~ /mswin/
   sh("rake java package") unless RUBY_PLATFORM =~ /java/
   # sh("rake mswin package") unless RUBY_PLATFORM =~ /mswin/
@@ -151,6 +154,7 @@ task :install => [:install_requirements] do
   sub_project("mongrel_upload_progress", :install)
   sub_project("mongrel_console", :install)
   sub_project("mongrel_cluster", :install)  
+  sub_project("mongrel_experimental", :install)
   sub_project("mongrel_service", :install) if RUBY_PLATFORM =~ /mswin/
 end
 
@@ -162,6 +166,7 @@ task :uninstall => [:clean] do
   sub_project("mongrel_console", :uninstall)
   sub_project("gem_plugin", :uninstall)
   sub_project("fastthread", :uninstall)  
+  sub_project("mongrel_experimental", :uninstall)  
   sub_project("mongrel_service", :uninstall) if RUBY_PLATFORM =~ /mswin/
 end
 
@@ -174,6 +179,7 @@ task :clean do
   sub_project("mongrel_upload_progress", :clean)
   sub_project("mongrel_console", :clean)
   sub_project("mongrel_cluster", :clean) 
+  sub_project("mongrel_experimental", :clean)    
   sub_project("mongrel_service", :clean) if RUBY_PLATFORM =~ /mswin/
 end
 
@@ -192,8 +198,8 @@ namespace :site do
     FileList["**/*.tgz"].each {|tgz| mv tgz, "pkg/tars" }
     
     # XXX Hack, because only Luis can package for Win32 right now
-    # sh "cp ~/Downloads/mongrel-#{e.version}-mswin32.gem pkg/gems/"
-    # sh "cp ~/Downloads/mongrel_service-0.3.3-mswin32.gem pkg/gems/"  
+    sh "cp ~/Downloads/mongrel-#{e.version}-mswin32.gem pkg/gems/"
+    sh "cp ~/Downloads/mongrel_service-0.3.3-mswin32.gem pkg/gems/"  
     sh "rm -rf pkg/mongrel*"
     sh "gem generate_index -d pkg"  
     sh "scp -r CHANGELOG pkg/* rubyforge.org:/var/www/gforge-projects/mongrel/releases/" 
