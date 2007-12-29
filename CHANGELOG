@@ -1,3 +1,4 @@
+v1.0.5. Closed remote exploit that allowed read access to any file.
 
 v1.0.4. Backport fixes for versioning inconsistency, mongrel_rails bug, and DirHandler bug.
 
