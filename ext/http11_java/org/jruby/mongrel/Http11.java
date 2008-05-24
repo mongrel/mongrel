@@ -247,7 +247,7 @@ public class Http11 extends RubyObject {
             if(this.hp.has_error()) {
                 throw new RaiseException(runtime, eHttpParserError, "Invalid HTTP format, parsing fails.", true);
             } else {
-                return runtime.newFixnum(this.hp.parser.nread);
+                return runtime.newFixnum((long)this.hp.parser.nread);
             }
         }
     }
