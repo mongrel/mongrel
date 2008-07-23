@@ -136,8 +136,11 @@ module Mongrel
       ops[:throttle] ||= 0
       ops[:timeout] ||= 60
 
-      @listener = Mongrel::HttpServer.new(ops[:host], ops[:port].to_i, ops[:num_processors].to_i, ops[:throttle].to_i, ops[:timeout].to_i) unless ops.has_key?(:unixmaster) and ops[:unixmaster]
-      @listener = Mongrel::UnixDispatchServer.new(ops[:host], ops[:port].to_i, ops[:min_children].to_i, ops[:max_childen].to_i) if ops.has_key?(:unixmaster) and ops[:unixmaster]
+      if ops[:unixmaster]
+        @listener = Mongrel::UnixDispatchServer.new(ops[:host], ops[:port].to_i, ops[:min_children].to_i, ops[:max_childen].to_i, ops[:throttle].to_i, ops[:timeout].to_i) 
+      else
+        @listener = Mongrel::HttpServer.new(ops[:host], ops[:port].to_i, ops[:num_processors].to_i, ops[:throttle].to_i, ops[:timeout].to_i)
+      end
       @listener_name = "#{ops[:host]}:#{ops[:port]}"
       @listeners[@listener_name] = @listener
 

@@ -41,7 +41,9 @@ module Mongrel
   class TimeoutError < Exception; end
 
   class UriChangeEvent < Exception; end
-
+  
+  class MaxChildrenCapicityReached < Exception; end
+  
   # A Hash with one extra parameter for the HTTP body, used internally.
   class HttpParams < Hash
     attr_accessor :http_body
@@ -356,6 +358,7 @@ module Mongrel
                 sleep @throttle if @throttle > 0
               end
             rescue StopServer
+              @socket.close
               break
             rescue Errno::EMFILE
               reap_dead_workers("too many open files")
@@ -370,7 +373,7 @@ module Mongrel
           end
           graceful_shutdown
         ensure
-          @socket.close
+          @socket.close unless @socket.closed?
           # STDERR.puts "#{Time.now}: Closed socket."
         end
       end
@@ -384,7 +387,7 @@ module Mongrel
     attr_reader :num_children
     attr_reader :max_children
 
-    def initialize(host, port, min_children=5, max_children=nil, log=nil, log_level=:debug)
+    def initialize(host, port, min_children=5, max_children=nil, throttle = 0, timeout=60, log=nil, log_level=:debug)
       @host     = host
       @port     = port
       @domain   = 'unix'
@@ -394,8 +397,7 @@ module Mongrel
 
       @terminate = false
       @children  = Hash.new
-      @busy      = Hash.new
-
+      
       @min_children = min_children
       @max_children = max_children
 
@@ -405,7 +407,7 @@ module Mongrel
     def reap_dead_workers(reason=nil)
     end # do nothing, not useful for the unix dispatch server
 
-    def runchild(server)
+    def run_child(server)
       BasicSocket.do_not_reverse_lookup = true
 
       configure_socket_options
@@ -418,9 +420,7 @@ module Mongrel
               server.flush
 
               client = server.recv_io(TCPSocket) # read the client's file descriptor from the server!
-              unless client.is_a?(TCPSocket)
-                next
-              end
+              next unless client.is_a?(TCPSocket)
               if client.respond_to?(:setsockopt)  and defined?($tcp_cork_opts) and $tcp_cork_opts
                 client.setsockopt(*$tcp_cork_opts) rescue nil
               end
@@ -450,7 +450,7 @@ module Mongrel
       return @acceptor
     end
 
-    def start_child
+    def fork_child
       cio,sio = UNIXSocket::socketpair
       @close_on_fork << sio
 
@@ -463,11 +463,11 @@ module Mongrel
             trap("HUP")  { @terminate = true; stop }
             trap("TERM") { @terminate = true; stop }
           end
-	  begin
-            runchild(cio).join
-	  rescue StopServer
-	    nil # no need to log this, it's just going to terminate the child.
-	  end
+          begin
+            run_child(cio).join
+          rescue StopServer
+            nil # no need to log this, it's just going to terminate the child.
+          end
           Kernel.exit!(0)
         rescue Object => e
           STDERR.puts "Child #{$$} Unhandled listen loop exception #{e.inspect}."
@@ -480,10 +480,15 @@ module Mongrel
       [pid,sio]
     end
 
-    def evict_child(pid)
+    def evict_child_by_pid(pid)
+      evict_child(@children[pid]) if @children.has_key?(pid)
+    end
+    
+    def evict_child(child)
+      return if child.nil?
       begin
-        Process.kill("TERM", pid) 
-        Process.waitpid(pid)
+        Process.kill("TERM", child.pid) 
+        Process.waitpid(child.pid)
       rescue Errno::ESRCH,Errno::ECHILD => e
         nil # ignore
       rescue StopServer
@@ -493,22 +498,78 @@ module Mongrel
         STDERR.puts "Server #{$$} Unhandled exception #{e.inspect}."
         STDERR.puts :error, e.backtrace.join("\n")
       end
-
-      if @children.has_key?(pid)
-        io = @children.delete(pid)
-        if io.respond_to?(:close)
-          io.close rescue nil
+      
+      child.close
+      @children.delete(child.pid)
+    end
+    
+    def gc_children
+      @children.values.each do |child|
+        begin
+          do_evict = false
+          do_evict = true if (child.closed? or child.hanging?)
+        rescue Errno::ECHILD
+          do_evict = true
+        rescue StopServer
+          raise # pass it up the chain, don't ignore it.
+        rescue Object => e
+          STDERR.puts "Server #{$$} Unhandled exception #{e.inspect}."
+          STDERR.puts e.backtrace.join("\n")
         end
-      end
 
-      if @busy.has_key?(pid)
-        io = @busy.delete(pid)
-        if io.respond_to?(:close)
-          io.close rescue nil
-        end
+        evict_child(child) if do_evict
       end
     end
- 
+    
+    def spawn_min_children
+      while @children.length < @min_children do
+        spawn_child
+      end
+    end
+    
+    def spawn_child
+      pid, socket = fork_child
+      child = UnixDispatchChild.new(pid, socket)
+      @children[pid] = child
+      child
+    end
+    
+    # Spawn a child process and wait for it to be ready
+    def spawn_child!
+      child = spawn_child
+      process_child_status_update(child.socket)# wait for it to be ready
+      child
+    end
+    
+    def forward_http_request(client)
+      child = @children.values.find { |c| not c.busy? } || spawn_child!
+      child.receive(client)
+    rescue MaxChildrenCapicityReached
+      STDERR.puts "Server #{$$} Maximum number of child processes exceeded, request aborted"
+      client.close rescue nil
+    rescue StandardError => e
+      STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary."
+      STDERR.puts "Server #{$$} #{e.message}"
+    end
+    
+    def process_child_status_update(socket)
+      case socket.readline.chomp
+      when /^READY\s+(\d+)$/
+        return unless (child = @children[$1.to_i])
+        child.close_client
+      when /CLOSED\s+(\d+)/
+        evict_child_by_pid($1.to_i)
+      end
+    rescue EOFError
+      # Child process has gone mad - give it the boot
+      evict_child(@children.values.find { |c| child.socket == socket })
+    end
+    
+    def wait_for_incoming_connections(time_to_wait)
+      readfds = [ @serversock ] + @children.values.map { |c| c.socket }
+      Kernel.select(readfds, nil, nil, time_to_wait).first || []
+    end
+    
     def run
       BasicSocket.do_not_reverse_lookup = true
       configure_socket_options
@@ -518,119 +579,34 @@ module Mongrel
       end
 
       @acceptor = Thread.new do
-
         begin
           while not @terminate
             begin
-              @children.each_key do |pid|
+              gc_children
+              spawn_min_children
+
+              incoming_connections = wait_for_incoming_connections(60)
+              
+              # If nobody wants to talk to us, go terminate an excess child
+              evict_child(@children.values.find { |c| not c.busy? }) if incoming_connections.empty? && @children.length > @min_children
+              
+              http_connection, child_connections = incoming_connections.delete(@serversock), incoming_connections
+              
+              # By processing child_connections first, we give them a chance to become available before processing the HTTP connections
+              child_connections.each { |child_connection| process_child_status_update(child_connection) }
+              
+              if http_connection
                 begin
-                  do_evict = false
-                  do_evict = true if (@children[pid].closed? or Process.waitpid(pid, Process::WNOHANG) == pid)
-                rescue Errno::ECHILD
-                  do_evict = true
-                rescue StopServer
-                  raise # pass it up the chain, don't ignore it.
-                rescue Object => e
-                  STDERR.puts "Server #{$$} Unhandled exception #{e.inspect}."
-                  STDERR.puts e.backtrace.join("\n")
-                end
-
-                evict_child(pid) if do_evict
-              end
-
-              if @children.length < @min_children
-                (@children.length .. @min_children).each do
-                  pid, socket = start_child
-                  @children[pid] = socket
-                  @busy[pid]     = true
+                  forward_http_request(http_connection.accept)
+                rescue StandardError => e
+                  STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary.   #{e.message}"
                 end
               end
-
-              readfds = [ @serversock ] + @children.values 
-              r,w,e  = Kernel.select(readfds, nil, nil, 60)
-
-              # check to see if anyone wants to talk to us. If no one is talking
-              # and we have more than the necessary number of children then signal
-              # one to terminate.
-              #
-              evict_child(@children.keys.first) if (r.nil? or r.empty?) and @children.length > @min_children
-              next if r.nil?
-
-              # OK, someone is talking. Find out who and process the client.
-              # Delay the processing of the TCP server socket until all the children
-              # are finished. This allows a client to become available before processing
-              # the HTTP connection.
-              #
-              flag_http = false
-              r.each do |io|
-                if io == @serversock # a new connection from apache or the outside world
-                  flag_http = true  # defer
-                else                # one of the children
-                  begin
-                    msg = io.readline
-                    msg.chomp!
-                    if msg =~ /^READY\s+(\d+)$/
-                      pid = $1.to_i
-                      if @busy[pid].respond_to?(:close)
-                        @busy[pid].close rescue nil
-                      end
-                      @busy[pid] = false
-                    elsif msg =~ /CLOSED\s+(\d+)/
-                      evict_child($1.to_i)
-                    end
-                  rescue EOFError
-                    @children.each_key do |pid|
-                      evict_child(pid) if @children[pid] == io
-                    end
-                  end
-                end
-              end
-
-              next unless flag_http
-
-              client = nil
-              begin
-                client = @serversock.accept
-              rescue StandardError => e
-                STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary."
-                STDERR.puts "Server #{$$} #{e.message}"
-              end
-
-              next if client.nil?
-
-              @busy.each_pair do |pid,busy|
-                unless busy
-                  io = @children[pid]
-                  io.send_io(client)
-                  io.flush
-
-                  @busy[pid] = client
-                  client = nil
-                  break
-                end
-              end
-
-              if client and not @max_children.nil? and @max_children == @children.length
-                STDERR.puts "Server #{$$} Maximum number of child processes exceeded, request aborted"
-                client.close rescue nil
-                client = nil
-              end
-
-              next unless client
-
-              # spin up a new one
-              #
-              pid, socket = start_child
-              @children[pid] = socket
-              socket.readline
-              socket.send_io(client)
-              socket.flush
-              @busy[pid] = client
-
+              
             rescue StopServer
               @terminate = true
             rescue UriChangeEvent
-              @children.keys.each { |pid| evict_child(pid) }
+              @children.keys.each { |pid| evict_child_by_pid(pid) }
             rescue Object => e
               STDERR.puts "Server #{$$} Unhandled listen loop exception #{e.inspect}."
               STDERR.puts e.backtrace.join("\n")
@@ -638,7 +614,7 @@ module Mongrel
           end
         ensure
           @serversock.close  rescue nil
-          @children.each_key { |pid| evict_child(pid) }
+          @children.each_key { |pid| evict_child_by_pid(pid) }
         end
       end # end thread
 
@@ -653,6 +629,53 @@ module Mongrel
     def unregister(uri)
       super(uri)
       @acceptor.raise(UriChangeEvent.new) if not @acceptor.nil? and @acceptor.alive?
+    end
+  end
+  
+  class UnixDispatchChild
+    attr_accessor :socket, :pid, :client, :request_start_time
+    def initialize(pid, socket)
+      @socket = socket
+      @pid = pid
+      @client = true
+      @request_start_time = nil
+    end
+    
+    def busy?
+      @client ? true : false
+    end
+    
+    def closed?
+      if @socket.respond_to?(:closed?)
+        @socket.closed?
+      else
+        true
+      end
+    end
+    
+    def hanging?
+      Process.waitpid(pid, Process::WNOHANG) == pid
+    end
+    
+    def close_client
+      @client.close rescue nil if @client.respond_to?(:close)
+      @client = nil
+    end
+    
+    def close_socket
+      @socket.close rescue nil if @socket.respond_to?(:close)
+    end
+    
+    def close
+      close_socket
+      close_client
+    end
+    
+    def receive(client)
+      raise ArgumentError, "Client is dead, but server tried to give it a connection anyways" if closed?
+      @socket.send_io(client)
+      @socket.flush
+      @client = client
     end
   end
 end
