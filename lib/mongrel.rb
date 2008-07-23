@@ -386,6 +386,19 @@ module Mongrel
     attr_reader :min_children
     attr_reader :num_children
     attr_reader :max_children
+    
+    class << self
+      def before_fork_procs; @before_fork_procs ||= []; end
+      def after_fork_procs; @after_fork_procs ||= []; end
+      
+      def before_fork(&block)
+        before_fork_procs << block
+      end
+      
+      def after_fork(&block)
+        after_fork_procs << block
+      end
+    end
 
     def initialize(options = {})
       super(options[:throttle], options[:timeout])
@@ -504,7 +517,10 @@ module Mongrel
     def fork_child
       cio,sio = UNIXSocket::socketpair
       @listening_sockets << sio
+      self.class.before_fork_procs.each { |p| p.call }
       pid = fork
+      self.class.after_fork_procs.each { |p| p.call }
+      
       if pid.nil? # child
         begin
           @listening_sockets.each { |io| io.close rescue nil }
