@@ -40,39 +40,19 @@ module Mongrel
   # Thrown at a thread when it is timed out.
   class TimeoutError < Exception; end
 
+  class UriChangeEvent < Exception; end
+
   # A Hash with one extra parameter for the HTTP body, used internally.
   class HttpParams < Hash
     attr_accessor :http_body
   end
 
-
-  # This is the main driver of Mongrel, while the Mongrel::HttpParser and Mongrel::URIClassifier
-  # make up the majority of how the server functions.  It's a very simple class that just
-  # has a thread accepting connections and a simple HttpServer.process_client function
-  # to do the heavy lifting with the IO and Ruby.  
-  #
-  # You use it by doing the following:
-  #
-  #   server = HttpServer.new("0.0.0.0", 3000)
-  #   server.register("/stuff", MyNiftyHandler.new)
-  #   server.run.join
-  #
-  # The last line can be just server.run if you don't want to join the thread used.
-  # If you don't though Ruby will mysteriously just exit on you.
-  #
-  # Ruby's thread implementation is "interesting" to say the least.  Experiments with
-  # *many* different types of IO processing simply cannot make a dent in it.  Future
-  # releases of Mongrel will find other creative ways to make threads faster, but don't
-  # hold your breath until Ruby 1.9 is actually finally useful.
-  class HttpServer
-    attr_reader :acceptor
-    attr_reader :workers
-    attr_reader :classifier
-    attr_reader :host
-    attr_reader :port
-    attr_reader :throttle
-    attr_reader :timeout
-    attr_reader :num_processors
+  class Server
+    attr_accessor :classifier
+    attr_reader   :acceptor
+    attr_reader   :domain
+    attr_reader   :host
+    attr_reader   :port
 
     # Creates a working server on host:port (strange things happen if port isn't a Number).
     # Use HttpServer::run to start the server and HttpServer.acceptor.join to 
@@ -87,18 +67,8 @@ module Mongrel
     # The throttle parameter is a sleep timeout (in hundredths of a second) that is placed between 
     # socket.accept calls in order to give the server a cheap throttle time.  It defaults to 0 and
     # actually if it is 0 then the sleep is not done at all.
-    def initialize(host, port, num_processors=950, throttle=0, timeout=60)
-      
-      tries = 0
-      @socket = TCPServer.new(host, port) 
-      
+    def initialize
       @classifier = URIClassifier.new
-      @host = host
-      @port = port
-      @workers = ThreadGroup.new
-      @throttle = throttle / 100.0
-      @num_processors = num_processors
-      @timeout = timeout
     end
 
     # Does the majority of the IO processing.  It has been written in Ruby using
@@ -204,6 +174,120 @@ module Mongrel
       end
     end
 
+    def read_dead_workers(reason=nil)
+      raise RuntimeError, "This method must be overridden in a derived class"
+    end
+
+    def configure_socket_options
+      case RUBY_PLATFORM
+      when /linux/
+        # 9 is currently TCP_DEFER_ACCEPT
+        $tcp_defer_accept_opts = [Socket::SOL_TCP, 9, 1]
+        $tcp_cork_opts = [Socket::SOL_TCP, 3, 1]
+      when /freebsd(([1-4]\..{1,2})|5\.[0-4])/
+        # Do nothing, just closing a bug when freebsd <= 5.4
+      when /freebsd/
+        # Use the HTTP accept filter if available.
+        # The struct made by pack() is defined in /usr/include/sys/socket.h as accept_filter_arg
+        unless `/sbin/sysctl -nq net.inet.accf.http`.empty?
+          $tcp_defer_accept_opts = [Socket::SOL_SOCKET, Socket::SO_ACCEPTFILTER, ['httpready', nil].pack('a16a240')]
+        end
+      end
+    end
+    
+    # Runs the thing.  It returns the thread used so you can "join" it.  You can also
+    # access the HttpServer::acceptor attribute to get the thread later.
+    def run
+      raise RuntimeError, "This method must be overridden in a derived class"
+    end
+
+    # Simply registers a handler with the internal URIClassifier.  When the URI is
+    # found in the prefix of a request then your handler's HttpHandler::process method
+    # is called.  See Mongrel::URIClassifier#register for more information.
+    #
+    # If you set in_front=true then the passed in handler will be put in the front of the list
+    # for that particular URI. Otherwise it's placed at the end of the list.
+    def register(uri, handler, in_front=false)
+      begin
+        @classifier.register(uri, [handler])
+      rescue URIClassifier::RegistrationError
+        handlers = @classifier.resolve(uri)[2]
+        method_name = in_front ? 'unshift' : 'push'
+        handlers.send(method_name, handler)
+      end
+      handler.listener = self
+    end
+
+    # Removes any handlers registered at the given URI.  See Mongrel::URIClassifier#unregister
+    # for more information.  Remember this removes them *all* so the entire
+    # processing chain goes away.
+    def unregister(uri)
+      @classifier.unregister(uri)
+    end
+
+    # Stops the acceptor thread and then causes the worker threads to finish
+    # off the request queue before finally exiting.
+    def stop(synchronous=false)
+      unless @acceptor.nil?
+        @acceptor.raise(StopServer.new)
+
+        if synchronous
+          sleep(0.5) while @acceptor.alive?
+        end
+      end
+    end
+  end
+
+  # This is the main driver of Mongrel, while the Mongrel::HttpParser and Mongrel::URIClassifier
+  # make up the majority of how the server functions.  It's a very simple class that just
+  # has a thread accepting connections and a simple HttpServer.process_client function
+  # to do the heavy lifting with the IO and Ruby.  
+  #
+  # You use it by doing the following:
+  #
+  #   server = HttpServer.new("0.0.0.0", 3000)
+  #   server.register("/stuff", MyNiftyHandler.new)
+  #   server.run.join
+  #
+  # The last line can be just server.run if you don't want to join the thread used.
+  # If you don't though Ruby will mysteriously just exit on you.
+  #
+  # Ruby's thread implementation is "interesting" to say the least.  Experiments with
+  # *many* different types of IO processing simply cannot make a dent in it.  Future
+  # releases of Mongrel will find other creative ways to make threads faster, but don't
+  # hold your breath until Ruby 1.9 is actually finally useful.
+  class HttpServer < Server
+    attr_reader :workers
+    attr_reader :throttle
+    attr_reader :timeout
+    attr_reader :num_processors
+
+    # Creates a working server on host:port (strange things happen if port isn't a Number).
+    # Use HttpServer::run to start the server and HttpServer.acceptor.join to 
+    # join the thread that's processing incoming requests on the socket.
+    #
+    # The num_processors optional argument is the maximum number of concurrent
+    # processors to accept, anything over this is closed immediately to maintain
+    # server processing performance.  This may seem mean but it is the most efficient
+    # way to deal with overload.  Other schemes involve still parsing the client's request
+    # which defeats the point of an overload handling system.
+    # 
+    # The throttle parameter is a sleep timeout (in hundredths of a second) that is placed between 
+    # socket.accept calls in order to give the server a cheap throttle time.  It defaults to 0 and
+    # actually if it is 0 then the sleep is not done at all.
+    def initialize(host, port, num_processors=950, throttle=0, timeout=60)
+      @host = host
+      @port = port
+      @domain = "tcp"
+      super()
+
+      @socket = TCPServer.new(host, port) 
+      @workers = ThreadGroup.new
+      @throttle = throttle / 100.0
+      @num_processors = num_processors
+      @timeout = timeout
+    end
+
     # Used internally to kill off any worker threads that have taken too long
     # to complete processing.  Only called if there are too many processors
     # currently servicing.  It returns the count of workers still active
@@ -234,23 +318,6 @@ module Mongrel
       while reap_dead_workers("shutdown") > 0
         STDERR.puts "Waiting for #{@workers.list.length} requests to finish, could take #{@timeout + @throttle} seconds."
         sleep @timeout / 10
-      end
-    end
-
-    def configure_socket_options
-      case RUBY_PLATFORM
-      when /linux/
-        # 9 is currently TCP_DEFER_ACCEPT
-        $tcp_defer_accept_opts = [Socket::SOL_TCP, 9, 1]
-        $tcp_cork_opts = [Socket::SOL_TCP, 3, 1]
-      when /freebsd(([1-4]\..{1,2})|5\.[0-4])/
-        # Do nothing, just closing a bug when freebsd <= 5.4
-      when /freebsd/
-        # Use the HTTP accept filter if available.
-        # The struct made by pack() is defined in /usr/include/sys/socket.h as accept_filter_arg
-        unless `/sbin/sysctl -nq net.inet.accf.http`.empty?
-          $tcp_defer_accept_opts = [Socket::SOL_SOCKET, Socket::SO_ACCEPTFILTER, ['httpready', nil].pack('a16a240')]
-        end
       end
     end
     
@@ -310,41 +377,283 @@ module Mongrel
 
       return @acceptor
     end
+  end
 
-    # Simply registers a handler with the internal URIClassifier.  When the URI is
-    # found in the prefix of a request then your handler's HttpHandler::process method
-    # is called.  See Mongrel::URIClassifier#register for more information.
-    #
-    # If you set in_front=true then the passed in handler will be put in the front of the list
-    # for that particular URI. Otherwise it's placed at the end of the list.
-    def register(uri, handler, in_front=false)
+  class UnixDispatchServer < Server
+    attr_reader :min_children
+    attr_reader :num_children
+    attr_reader :max_children
+
+    def initialize(host, port, min_children=5, max_children=nil, log=nil, log_level=:debug)
+      @host     = host
+      @port     = port
+      @domain   = 'unix'
+      super()
+
+      @serversock= TCPServer.new(@host,@port)
+
+      @terminate = false
+      @children  = Hash.new
+      @busy      = Hash.new
+
+      @min_children = min_children
+      @max_children = max_children
+
+      @close_on_fork = [@serversock]
+    end
+
+    def reap_dead_workers(reason=nil)
+    end # do nothing, not useful for the unix dispatch server
+
+    def runchild(server)
+      BasicSocket.do_not_reverse_lookup = true
+
+      configure_socket_options
+
+      @acceptor = Thread.new do
+        begin
+          while not @terminate
+            begin
+              server.write("READY #{$$}\n")
+              server.flush
+
+              client = server.recv_io(TCPSocket) # read the client's file descriptor from the server!
+              unless client.is_a?(TCPSocket)
+                next
+              end
+              if client.respond_to?(:setsockopt)  and defined?($tcp_cork_opts) and $tcp_cork_opts
+                client.setsockopt(*$tcp_cork_opts) rescue nil
+              end
+
+              process_client(client)
+            rescue StopServer
+              @terminate = true
+            rescue Errno::ECONNABORTED
+              client.close rescue nil
+            rescue Errno::EPIPE
+              # server broke connection
+              @terminate = true
+            rescue SignalException => e
+              # child signaled to terminate
+              @terminate = true
+            rescue Object => e
+              @terminte = true
+              STDERR.puts "Child #{$$} Unhandled listen loop exception #{e.inspect}."
+              STDERR.puts e.backtrace.join("\n")
+            end
+          end
+        ensure
+          server.write("CLOSED #{$$}\n") rescue nil
+          server.close rescue nil
+        end
+      end
+      return @acceptor
+    end
+
+    def start_child
+      cio,sio = UNIXSocket::socketpair
+      @close_on_fork << sio
+
+      pid = fork
+      if pid.nil? # child
+        begin
+          @close_on_fork.each { |io| io.close rescue nil }
+          unless RUBY_PLATFORM =~ /djgpp|(cyg|ms|bcc)win|mingw/
+            trap("INT")  { @terminate = true; stop }
+            trap("HUP")  { @terminate = true; stop }
+            trap("TERM") { @terminate = true; stop }
+          end
+	  begin
+            runchild(cio).join
+	  rescue StopServer
+	    nil # no need to log this, it's just going to terminate the child.
+	  end
+          Kernel.exit!(0)
+        rescue Object => e
+          STDERR.puts "Child #{$$} Unhandled listen loop exception #{e.inspect}."
+          STDERR.puts e.backtrace.join("\n")
+        end
+        Kernel.exit!(1)
+      end
+
+      cio.close rescue nil
+      [pid,sio]
+    end
+
+    def evict_child(pid)
       begin
-        @classifier.register(uri, [handler])
-      rescue URIClassifier::RegistrationError
-        handlers = @classifier.resolve(uri)[2]
-        method_name = in_front ? 'unshift' : 'push'
-        handlers.send(method_name, handler)
+        Process.kill("TERM", pid) 
+        Process.waitpid(pid)
+      rescue Errno::ESRCH,Errno::ECHILD => e
+        nil # ignore
+      rescue StopServer
+        # be sure to pass the stop up the call chain until it gets to the toplevel handler!
+        raise
+      rescue Object => e
+        STDERR.puts "Server #{$$} Unhandled exception #{e.inspect}."
+        STDERR.puts :error, e.backtrace.join("\n")
       end
-      handler.listener = self
+
+      if @children.has_key?(pid)
+        io = @children.delete(pid)
+        if io.respond_to?(:close)
+          io.close rescue nil
+        end
+      end
+
+      if @busy.has_key?(pid)
+        io = @busy.delete(pid)
+        if io.respond_to?(:close)
+          io.close rescue nil
+        end
+      end
+    end
+ 
+    def run
+      BasicSocket.do_not_reverse_lookup = true
+      configure_socket_options
+
+      if defined?($tcp_defer_accept_opts) and $tcp_defer_accept_opts
+          @serversock.setsockopt(*$tcp_defer_accept_opts) rescue nil
+      end
+
+      @acceptor = Thread.new do
+
+        begin
+          while not @terminate
+            begin
+              @children.each_key do |pid|
+                begin
+                  do_evict = false
+                  do_evict = true if (@children[pid].closed? or Process.waitpid(pid, Process::WNOHANG) == pid)
+                rescue Errno::ECHILD
+                  do_evict = true
+                rescue StopServer
+                  raise # pass it up the chain, don't ignore it.
+                rescue Object => e
+                  STDERR.puts "Server #{$$} Unhandled exception #{e.inspect}."
+                  STDERR.puts e.backtrace.join("\n")
+                end
+
+                evict_child(pid) if do_evict
+              end
+
+              if @children.length < @min_children
+                (@children.length .. @min_children).each do
+                  pid, socket = start_child
+                  @children[pid] = socket
+                  @busy[pid]     = true
+                end
+              end
+
+              readfds = [ @serversock ] + @children.values 
+              r,w,e  = Kernel.select(readfds, nil, nil, 60)
+
+              # check to see if anyone wants to talk to us. If no one is talking
+              # and we have more than the necessary number of children then signal
+              # one to terminate.
+              #
+              evict_child(@children.keys.first) if (r.nil? or r.empty?) and @children.length > @min_children
+              next if r.nil?
+
+              # OK, someone is talking. Find out who and process the client.
+              # Delay the processing of the TCP server socket until all the children
+              # are finished. This allows a client to become available before processing
+              # the HTTP connection.
+              #
+              flag_http = false
+              r.each do |io|
+                if io == @serversock # a new connection from apache or the outside world
+                  flag_http = true  # defer
+                else                # one of the children
+                  begin
+                    msg = io.readline
+                    msg.chomp!
+                    if msg =~ /^READY\s+(\d+)$/
+                      pid = $1.to_i
+                      if @busy[pid].respond_to?(:close)
+                        @busy[pid].close rescue nil
+                      end
+                      @busy[pid] = false
+                    elsif msg =~ /CLOSED\s+(\d+)/
+                      evict_child($1.to_i)
+                    end
+                  rescue EOFError
+                    @children.each_key do |pid|
+                      evict_child(pid) if @children[pid] == io
+                    end
+                  end
+                end
+              end
+
+              next unless flag_http
+
+              client = nil
+              begin
+                client = @serversock.accept
+              rescue StandardError => e
+                STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary."
+                STDERR.puts "Server #{$$} #{e.message}"
+              end
+
+              next if client.nil?
+
+              @busy.each_pair do |pid,busy|
+                unless busy
+                  io = @children[pid]
+                  io.send_io(client)
+                  io.flush
+
+                  @busy[pid] = client
+                  client = nil
+                  break
+                end
+              end
+
+              if client and not @max_children.nil? and @max_children == @children.length
+                STDERR.puts "Server #{$$} Maximum number of child processes exceeded, request aborted"
+                client.close rescue nil
+                client = nil
+              end
+
+              next unless client
+
+              # spin up a new one
+              #
+              pid, socket = start_child
+              @children[pid] = socket
+              socket.readline
+              socket.send_io(client)
+              socket.flush
+              @busy[pid] = client
+
+            rescue StopServer
+              @terminate = true
+            rescue UriChangeEvent
+              @children.keys.each { |pid| evict_child(pid) }
+            rescue Object => e
+              STDERR.puts "Server #{$$} Unhandled listen loop exception #{e.inspect}."
+              STDERR.puts e.backtrace.join("\n")
+            end
+          end
+        ensure
+          @serversock.close  rescue nil
+          @children.each_key { |pid| evict_child(pid) }
+        end
+      end # end thread
+
+      return @acceptor
     end
 
-    # Removes any handlers registered at the given URI.  See Mongrel::URIClassifier#unregister
-    # for more information.  Remember this removes them *all* so the entire
-    # processing chain goes away.
+    def register(uri, handler, in_front=false)
+      super(uri,handler,in_front)
+      @acceptor.raise(UriChangeEvent.new) if not @acceptor.nil? and @acceptor.alive?
+    end
+
     def unregister(uri)
-      @classifier.unregister(uri)
+      super(uri)
+      @acceptor.raise(UriChangeEvent.new) if not @acceptor.nil? and @acceptor.alive?
     end
-
-    # Stops the acceptor thread and then causes the worker threads to finish
-    # off the request queue before finally exiting.
-    def stop(synchronous=false)
-      @acceptor.raise(StopServer.new)
-
-      if synchronous
-        sleep(0.5) while @acceptor.alive?
-      end
-    end
-
   end
 end
 
@@ -353,3 +662,5 @@ end
 
 $LOAD_PATH.unshift 'projects/mongrel_experimental/lib/'
 Mongrel::Gems.require 'mongrel_experimental', ">=#{Mongrel::Const::MONGREL_VERSION}"
+
+# vim:expandtab:shiftwidth=2:tabstop=2
