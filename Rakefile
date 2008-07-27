@@ -15,13 +15,13 @@ e = Echoe.new("mongrel") do |p|
   p.dependencies = ['gem_plugin >=0.2.3']  
   p.extension_pattern = nil
   
-  p.certificate_chain = case ENV['USER']
+  p.certificate_chain = case ENV['USER'] || ENV['USERNAME']
     when 'eweaver' 
       ['~/p/configuration/gem_certificates/mongrel/mongrel-public_cert.pem',
        '~/p/configuration/gem_certificates/evan_weaver-mongrel-public_cert.pem']
-    when 'luislavena'
-      ['~/gem_certificates/mongrel-public_cert.pem',
-        '~/gem_certificates/luislavena-mongrel-public_cert.pem']    
+    when 'Luis', 'luislavena'
+      ['~/projects/gem_certificates/mongrel-public_cert.pem',
+        '~/projects/gem_certificates/luislavena-mongrel-public_cert.pem']    
   end
   
   p.need_tar_gz = false
