@@ -37,8 +37,8 @@ class HandlersTest < Test::Unit::TestCase
     @port = process_based_port
     stats = Mongrel::StatisticsFilter.new(:sample_rate => 1)
 
-    @config = Mongrel::Configurator.new :host => '127.0.0.1', :port => @port do
-      listener do
+    @config = Mongrel::Configurator.new :host => '127.0.0.1' do
+      listener :port => process_based_port do
         uri "/", :handler => SimpleHandler.new
         uri "/", :handler => stats
         uri "/404", :handler => Mongrel::Error404Handler.new("Not found")
