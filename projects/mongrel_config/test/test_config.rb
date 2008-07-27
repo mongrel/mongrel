@@ -14,7 +14,7 @@ end
 
 
 # these are only run if we're running on windows
-if RUBY_PLATFORM =~ /mswin/
+if RUBY_PLATFORM =~ /mswin|mingw/
   require 'mongrel_config/win32'
 
   class Win32Test < Test::Unit::TestCase

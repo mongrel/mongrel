@@ -7,7 +7,7 @@ class ConfigTool < GemPlugin::Plugin "/commands"
   include Mongrel::Command::Base
 
   def configure 
-    if RUBY_PLATFORM =~ /mswin/
+    if RUBY_PLATFORM =~ /mswin|mingw/
       options [
         ['-h', '--host ADDR', "Host to bind to for server", :@host, "0.0.0.0"],
         ['-p', '--port NUMBER', "Port to bind to", :@port, "3001"],
@@ -30,7 +30,7 @@ class ConfigTool < GemPlugin::Plugin "/commands"
       valid?(@port && @port.to_i > 0, "Must give a valid port")
       valid?(@host, "Host IP to bind must be given")
       
-    if RUBY_PLATFORM !~ /mswin/    
+    if RUBY_PLATFORM !~ /mswin|mingw/    
       valid_dir? @cwd, "Cannot change to a directory that doesn't exist"
       Dir.chdir @cwd
       valid_dir? "log", "Log directory does not exist"
@@ -42,7 +42,7 @@ class ConfigTool < GemPlugin::Plugin "/commands"
 
   def run
     # must require this here since rails and camping don't like eachother
-    if RUBY_PLATFORM =~ /mswin/
+    if RUBY_PLATFORM =~ /mswin|mingw/
       require 'mongrel_config/win32_app'
       $mongrel_rails_service = @mongrel_script
     else
@@ -55,7 +55,7 @@ class ConfigTool < GemPlugin::Plugin "/commands"
     $server = Mongrel::Camping::start(@host,@port,@uri,Configure)
 
     puts "** Configure is running at http://#{@host}:#{@port}#{@uri}"
-    if RUBY_PLATFORM !~ /mswin/
+    if RUBY_PLATFORM !~ /mswin|mingw/
       trap("INT") { 
         $server.stop 
       }

@@ -27,13 +27,13 @@ e = Echoe.new("mongrel") do |p|
   p.need_tar_gz = false
   p.need_tgz = true
 
-  if RUBY_PLATFORM !~ /mswin|java/
+  if RUBY_PLATFORM !~ /mswin|mingw|java/
     p.extension_pattern = ["ext/**/extconf.rb"]
   end
 
   p.eval = proc do
     case RUBY_PLATFORM
-    when /mswin/
+    when /mswin|mingw/
       self.files += ['lib/http11.so']
       self.platform = Gem::Platform::CURRENT
       add_dependency('cgi_multipart_eof_fix', '>= 2.4')
@@ -86,7 +86,7 @@ def java_classpath_arg
 end
 
 case RUBY_PLATFORM
-when /mswin/
+when /mswin|mingw/
   filename = "lib/http11.so"
   file filename do
     Dir.chdir("ext/http11") do
@@ -164,7 +164,7 @@ task :install => [:install_requirements] do
   sub_project("mongrel_console", :install)
   sub_project("mongrel_cluster", :install)
   # sub_project("mongrel_experimental", :install)
-  sub_project("mongrel_service", :install) if RUBY_PLATFORM =~ /mswin/
+  sub_project("mongrel_service", :install) if RUBY_PLATFORM =~ /mswin|mingw/
 end
 
 desc "for Mongrel and all its subprojects"
@@ -176,7 +176,7 @@ task :uninstall => [:clean] do
   sub_project("gem_plugin", :uninstall)
   sub_project("fastthread", :uninstall)
   # sub_project("mongrel_experimental", :uninstall)
-  sub_project("mongrel_service", :uninstall) if RUBY_PLATFORM =~ /mswin/
+  sub_project("mongrel_service", :uninstall) if RUBY_PLATFORM =~ /mswin|mingw/
 end
 
 desc "for Mongrel and all its subprojects"
@@ -189,7 +189,7 @@ task :clean do
   sub_project("mongrel_console", :clean)
   sub_project("mongrel_cluster", :clean)
   sub_project("mongrel_experimental", :clean)
-  sub_project("mongrel_service", :clean) if RUBY_PLATFORM =~ /mswin/
+  sub_project("mongrel_service", :clean) if RUBY_PLATFORM =~ /mswin|mingw/
 end
 
 #### Site upload tasks

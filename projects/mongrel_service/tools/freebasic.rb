@@ -39,7 +39,7 @@ module FreeBASIC
   # this help me reduce the attempts to remove already removed files.
   # works with src_files
   CLOBBER = Rake::FileList.new
-  ON_WINDOWS = (RUBY_PLATFORM =~ /mswin|cygwin|bccwin/)
+  ON_WINDOWS = (RUBY_PLATFORM =~ /mswin|mingw|cygwin|bccwin/)
   
   class ProjectTask
     attr_accessor :name
