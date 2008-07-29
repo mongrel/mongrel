@@ -182,17 +182,6 @@ module Mongrel
     def reap_dead_workers(reason=nil)
       raise RuntimeError, "This method must be overridden in a derived class"
     end
-    
-    # Performs a wait on all the currently running threads and kills any that take
-    # too long.  It waits by @timeout seconds, which can be set in .initialize or
-    # via mongrel_rails. The @throttle setting does extend this waiting period by
-    # that much longer.
-    def graceful_shutdown
-      while (running_requests = reap_dead_workers("shutdown")) > 0
-        STDERR.puts "Waiting for #{running_requests} requests to finish, could take #{@timeout + @throttle} seconds."
-        sleep @timeout / 10
-      end
-    end
 
     def configure_socket_options
       case RUBY_PLATFORM
@@ -323,6 +312,17 @@ module Mongrel
       return @workers.list.length
     end
     
+    # Performs a wait on all the currently running threads and kills any that take
+    # too long.  It waits by @timeout seconds, which can be set in .initialize or
+    # via mongrel_rails. The @throttle setting does extend this waiting period by
+    # that much longer.
+    def graceful_shutdown
+      while (running_requests = reap_dead_workers("shutdown")) > 0
+        STDERR.puts "Waiting for #{running_requests} requests to finish, could take #{@timeout + @throttle} seconds."
+        sleep @timeout / 10
+      end
+    end
+    
     # Runs the thing.  It returns the thread used so you can "join" it.  You can also
     # access the HttpServer::acceptor attribute to get the thread later.
     def run
@@ -393,16 +393,28 @@ module Mongrel
       @domain   = 'unix'
       super(throttle, timeout)
 
-      @server_socket= TCPServer.new(@host,@port)
-
-      @terminate = false
-      @children  = Hash.new
-      
-      @min_children = min_children
-      @max_children = (max_children == 0) ? nil : max_children
+      @min_children  = options[:min_children]
+      @max_children  = (options[:max_children] == 0) ? nil : options[:max_children]
       raise ArgumentError, "max_children is set lower than min_children" if @max_children && @min_children > @max_children
-
-      @close_on_fork = [@server_socket]
+      
+      @terminate     = false
+      @children      = Hash.new
+      @listening_sockets = []
+    end
+    
+    def establish_server_socket
+      @server_socket = TCPServer.new(@host, @port)
+      @listening_sockets << @server_socket
+      @server_socket
+    end
+    
+    def close_server_socket
+      @listening_sockets.delete(server_socket)
+      server_socket.close  rescue nil
+    end
+    
+    def server_socket
+      @server_socket || establish_server_socket
     end
         
     def busy_children
@@ -421,6 +433,17 @@ module Mongrel
       end
 
       return busy_children.length
+    end
+
+    # Performs a wait on all the currently running threads and kills any that take
+    # too long.  It waits by @timeout seconds, which can be set in .initialize or
+    # via mongrel_rails. The @throttle setting does extend this waiting period by
+    # that much longer.
+    def graceful_shutdown
+      while (reap_dead_workers("shutdown")) > 0
+        STDERR.puts "Waiting for #{busy_children.length} requests to finish, could take #{@timeout + @throttle} seconds."
+        process_incoming_connections(@timeout / 10)
+      end
     end
 
     def run_child(server)
@@ -468,12 +491,11 @@ module Mongrel
 
     def fork_child
       cio,sio = UNIXSocket::socketpair
-      @close_on_fork << sio
-
+      @listening_sockets << sio
       pid = fork
       if pid.nil? # child
         begin
-          @close_on_fork.each { |io| io.close rescue nil }
+          @listening_sockets.each { |io| io.close rescue nil }
           unless RUBY_PLATFORM =~ /djgpp|(cyg|ms|bcc)win|mingw/
             trap("INT")  { @terminate = true; stop }
             trap("HUP")  { @terminate = true; stop }
@@ -516,6 +538,7 @@ module Mongrel
       end
       
       child.close
+      @listening_sockets.delete(child.socket)
       @children.delete(child.pid)
     end
     
@@ -583,8 +606,28 @@ module Mongrel
     end
     
     def wait_for_incoming_connections(time_to_wait)
-      readfds = [ @server_socket ] + @children.values.map { |c| c.socket }
-      Kernel.select(readfds, nil, nil, time_to_wait).first || []
+      connections = Kernel.select(@listening_sockets, nil, nil, time_to_wait)
+      connections ? connections.first : []
+    end
+    
+    def process_incoming_connections(time_to_wait = 60)
+      incoming_connections = wait_for_incoming_connections(time_to_wait)
+      count = incoming_connections.length
+      
+      http_connection, child_connections = incoming_connections.delete(server_socket), incoming_connections
+      
+      # By processing child_connections first, we give them a chance to become available before processing the HTTP connections
+      child_connections.each { |child_connection| process_child_status_update(child_connection) }
+      
+      if http_connection
+        begin
+          forward_http_request(http_connection.accept)
+        rescue StandardError => e
+          STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary.   #{e.message}"
+        end
+      end
+      
+      return count
     end
     
     def run
@@ -602,26 +645,13 @@ module Mongrel
               gc_children
               spawn_min_children
 
-              incoming_connections = wait_for_incoming_connections(60)
+              count = process_incoming_connections(60)
               
               # If nobody wants to talk to us, go terminate an excess child
-              evict_child(@children.values.find { |c| not c.busy? }) if incoming_connections.empty? && @children.length > @min_children
-              
-              http_connection, child_connections = incoming_connections.delete(@server_socket), incoming_connections
-              
-              # By processing child_connections first, we give them a chance to become available before processing the HTTP connections
-              child_connections.each { |child_connection| process_child_status_update(child_connection) }
-              
-              if http_connection
-                begin
-                  forward_http_request(http_connection.accept)
-                rescue StandardError => e
-                  STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary.   #{e.message}"
-                end
-              end
+              evict_child(@children.values.find { |c| not c.busy? }) if count = 0 && @children.length > @min_children
               
             rescue StopServer
-              @server_socket.close  rescue nil # immediately detach from the server socket
+              close_server_socket # immediately detach from the server socket
               @terminate = true
             rescue UriChangeEvent
               @children.values.each { |child| evict_child(child) }
@@ -632,7 +662,7 @@ module Mongrel
           end
           graceful_shutdown
         ensure
-          @server_socket.close  rescue nil
+          close_server_socket
           @children.values.each { |child| evict_child(child) }
         end
       end # end thread
