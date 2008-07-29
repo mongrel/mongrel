@@ -55,6 +55,7 @@ module Mongrel
     attr_reader   :domain
     attr_reader   :host
     attr_reader   :port
+    attr_reader   :timeout
 
     # Creates a working server on host:port (strange things happen if port isn't a Number).
     # Use HttpServer::run to start the server and HttpServer.acceptor.join to 
@@ -69,8 +70,10 @@ module Mongrel
     # The throttle parameter is a sleep timeout (in hundredths of a second) that is placed between 
     # socket.accept calls in order to give the server a cheap throttle time.  It defaults to 0 and
     # actually if it is 0 then the sleep is not done at all.
-    def initialize
+    def initialize(throttle, timeout)
       @classifier = URIClassifier.new
+      @throttle = throttle
+      @timeout = timeout
     end
 
     # Does the majority of the IO processing.  It has been written in Ruby using
@@ -176,8 +179,19 @@ module Mongrel
       end
     end
 
-    def read_dead_workers(reason=nil)
+    def reap_dead_workers(reason=nil)
       raise RuntimeError, "This method must be overridden in a derived class"
+    end
+    
+    # Performs a wait on all the currently running threads and kills any that take
+    # too long.  It waits by @timeout seconds, which can be set in .initialize or
+    # via mongrel_rails. The @throttle setting does extend this waiting period by
+    # that much longer.
+    def graceful_shutdown
+      while (running_requests = reap_dead_workers("shutdown")) > 0
+        STDERR.puts "Waiting for #{running_requests} requests to finish, could take #{@timeout + @throttle} seconds."
+        sleep @timeout / 10
+      end
     end
 
     def configure_socket_options
@@ -261,7 +275,6 @@ module Mongrel
   class HttpServer < Server
     attr_reader :workers
     attr_reader :throttle
-    attr_reader :timeout
     attr_reader :num_processors
 
     # Creates a working server on host:port (strange things happen if port isn't a Number).
@@ -281,13 +294,11 @@ module Mongrel
       @host = host
       @port = port
       @domain = "tcp"
-      super()
+      super(throttle, timeout)
 
       @socket = TCPServer.new(host, port) 
       @workers = ThreadGroup.new
-      @throttle = throttle / 100.0
       @num_processors = num_processors
-      @timeout = timeout
     end
 
     # Used internally to kill off any worker threads that have taken too long
@@ -310,17 +321,6 @@ module Mongrel
       end
 
       return @workers.list.length
-    end
-
-    # Performs a wait on all the currently running threads and kills any that take
-    # too long.  It waits by @timeout seconds, which can be set in .initialize or
-    # via mongrel_rails. The @throttle setting does extend this waiting period by
-    # that much longer.
-    def graceful_shutdown
-      while reap_dead_workers("shutdown") > 0
-        STDERR.puts "Waiting for #{@workers.list.length} requests to finish, could take #{@timeout + @throttle} seconds."
-        sleep @timeout / 10
-      end
     end
     
     # Runs the thing.  It returns the thread used so you can "join" it.  You can also
@@ -391,21 +391,37 @@ module Mongrel
       @host     = host
       @port     = port
       @domain   = 'unix'
-      super()
+      super(throttle, timeout)
 
-      @serversock= TCPServer.new(@host,@port)
+      @server_socket= TCPServer.new(@host,@port)
 
       @terminate = false
       @children  = Hash.new
       
       @min_children = min_children
-      @max_children = max_children
+      @max_children = (max_children == 0) ? nil : max_children
+      raise ArgumentError, "max_children is set lower than min_children" if @max_children && @min_children > @max_children
 
-      @close_on_fork = [@serversock]
+      @close_on_fork = [@server_socket]
     end
+        
+    def busy_children
+      @children.values.select { |c| c.busy? }
+    end
+    
+    def reap_dead_workers(reason='unknown')
+      if busy_children.length > 0
+        STDERR.puts "#{Time.now}: Reaping #{busy_children.length} child(ren) because of '#{reason}'"
+        busy_children.each do |child|
+          if child.busy? && child.running_seconds > @timeout # + @throttle
+            STDERR.puts "Child #{child.pid} has been running too long, killing."
+            evict_child(child)#.raise(TimeoutError.new(error_msg))
+          end
+        end
+      end
 
-    def reap_dead_workers(reason=nil)
-    end # do nothing, not useful for the unix dispatch server
+      return busy_children.length
+    end
 
     def run_child(server)
       BasicSocket.do_not_reverse_lookup = true
@@ -528,6 +544,7 @@ module Mongrel
     end
     
     def spawn_child
+      raise MaxChildrenCapicityReached if @max_children && @children.length >= @max_children
       pid, socket = fork_child
       child = UnixDispatchChild.new(pid, socket)
       @children[pid] = child
@@ -566,7 +583,7 @@ module Mongrel
     end
     
     def wait_for_incoming_connections(time_to_wait)
-      readfds = [ @serversock ] + @children.values.map { |c| c.socket }
+      readfds = [ @server_socket ] + @children.values.map { |c| c.socket }
       Kernel.select(readfds, nil, nil, time_to_wait).first || []
     end
     
@@ -575,7 +592,7 @@ module Mongrel
       configure_socket_options
 
       if defined?($tcp_defer_accept_opts) and $tcp_defer_accept_opts
-          @serversock.setsockopt(*$tcp_defer_accept_opts) rescue nil
+          @server_socket.setsockopt(*$tcp_defer_accept_opts) rescue nil
       end
 
       @acceptor = Thread.new do
@@ -590,7 +607,7 @@ module Mongrel
               # If nobody wants to talk to us, go terminate an excess child
               evict_child(@children.values.find { |c| not c.busy? }) if incoming_connections.empty? && @children.length > @min_children
               
-              http_connection, child_connections = incoming_connections.delete(@serversock), incoming_connections
+              http_connection, child_connections = incoming_connections.delete(@server_socket), incoming_connections
               
               # By processing child_connections first, we give them a chance to become available before processing the HTTP connections
               child_connections.each { |child_connection| process_child_status_update(child_connection) }
@@ -604,17 +621,19 @@ module Mongrel
               end
               
             rescue StopServer
+              @server_socket.close  rescue nil # immediately detach from the server socket
               @terminate = true
             rescue UriChangeEvent
-              @children.keys.each { |pid| evict_child_by_pid(pid) }
+              @children.values.each { |child| evict_child(child) }
             rescue Object => e
               STDERR.puts "Server #{$$} Unhandled listen loop exception #{e.inspect}."
               STDERR.puts e.backtrace.join("\n")
             end
           end
+          graceful_shutdown
         ensure
-          @serversock.close  rescue nil
-          @children.each_key { |pid| evict_child_by_pid(pid) }
+          @server_socket.close  rescue nil
+          @children.values.each { |child| evict_child(child) }
         end
       end # end thread
 
@@ -662,6 +681,10 @@ module Mongrel
       @client = nil
     end
     
+    def running_seconds
+      busy? ? ( Time.now - @request_start_time ) : 0
+    end
+    
     def close_socket
       @socket.close rescue nil if @socket.respond_to?(:close)
     end
@@ -672,6 +695,7 @@ module Mongrel
     end
     
     def receive(client)
+      @request_start_time = Time.now
       raise ArgumentError, "Client is dead, but server tried to give it a connection anyways" if closed?
       @socket.send_io(client)
       @socket.flush
