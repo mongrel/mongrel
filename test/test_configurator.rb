@@ -3,7 +3,7 @@
 #
 # Additional work donated by contributors.  See http://mongrel.rubyforge.org/attributions.html 
 # for more information.
-
+Dir.chdir(File.dirname(__FILE__) + "/../")
 require 'test/testhelp'
 
 $test_plugin_fired = 0
@@ -83,5 +83,21 @@ class ConfiguratorTest < Test::Unit::TestCase
       res = Net::HTTP.get(URI.parse("http://localhost:4501/"))
     end
   end
-
+  
+  def test_pid_file_removal__file_renamed__should_find_my_pid_file
+    return if RUBY_PLATFORM =~ /mswin/
+    
+    @pid_file = File.dirname(__FILE__) + "/mongrel_test.pid"
+    @config = Mongrel::Configurator.new :host => "localhost", :pid_file => @pid_file do
+      @pid_file = defaults[:pid_file]
+      write_pid_file
+      File.rename(@pid_file, @pid_file.gsub(".pid", ".deprecated.pid"))
+      File.open(@pid_file, "w")  {|f| f << "BOGUSPID" }
+      remove_pid_file
+    end
+    
+    assert ! File.exist?(@pid_file.gsub(".pid", ".deprecated.pid"))
+    assert_equal "BOGUSPID", File.read(@pid_file)
+    File.delete(@pid_file)
+  end
 end

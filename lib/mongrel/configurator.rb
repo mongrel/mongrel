@@ -76,7 +76,8 @@ module Mongrel
     end
 
     def remove_pid_file
-      File.unlink(@pid_file) if @pid_file and File.exists?(@pid_file)
+      return if (pid_file = find_pid_file).nil?
+      File.unlink(pid_file) 
     end
 
     # Writes the PID file if we're not on Windows.
@@ -89,6 +90,16 @@ module Mongrel
           File.chmod(0644, @pid_file)
         end      
       end
+    end
+    
+    # pid file could be moved to .deprecated.pid
+    def find_pid_file(pid = nil)
+      return if @pid_file.nil? || RUBY_PLATFORM =~ /mswin/
+      pid ||= Process.pid
+      Dir[@pid_file.gsub(".pid", ".*pid")].each do |filename|
+        return filename if File.read(filename).to_i == pid
+      end
+      nil
     end
 
     # Generates a class for cloaking the current self and making the DSL nicer.
@@ -137,7 +148,15 @@ module Mongrel
       ops[:timeout] ||= 60
 
       if ops[:unixmaster]
-        @listener = Mongrel::UnixDispatchServer.new(ops[:host], ops[:port].to_i, ops[:min_children].to_i, ops[:max_childen].to_i, ops[:throttle].to_i, ops[:timeout].to_i) 
+        @listener = Mongrel::UnixDispatchServer.new(
+          :host         => ops[:host],
+          :port         => ops[:port].to_i,
+          :min_children => ops[:min_children].to_i,
+          :max_childen  => ops[:max_childen] && ops[:max_childen].to_i,
+          :throttle     => ops[:throttle].to_i,
+          :replace      => ops[:replace],
+          :timeout      => ops[:timeout].to_i
+        ) 
       else
         @listener = Mongrel::HttpServer.new(ops[:host], ops[:port].to_i, ops[:num_processors].to_i, ops[:throttle].to_i, ops[:timeout].to_i)
       end

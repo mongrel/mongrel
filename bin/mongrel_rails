@@ -45,6 +45,7 @@ module Mongrel
         ['-U', '--unixmaster', "Run the rails as a master-slave server", :@unixmaster, false],
         ['-N', '--children COUNT', "The default number of unix slaves to start", :@min_children, 5],
         ['-M', '--max-children COUNT', "The maximum number of unix slaves to start", :@max_children, nil],
+        ['-R', '--replace', "Replace the current running instance of mongrel", :@replace, false],
         ['', '--user USER', "User to run as", :@user, nil],
         ['', '--group GROUP', "Group to run as", :@group, nil],
         ['', '--prefix PATH', "URL prefix for Rails app", :@prefix, nil]
@@ -83,7 +84,7 @@ module Mongrel
 
     def run
       if @generate
-	@generate = File.expand_path(@generate)
+        @generate = File.expand_path(@generate)
         STDERR.puts "** Writing config to \"#@generate\"."
         open(@generate, "w") {|f| f.write(settings.to_yaml) }
         STDERR.puts "** Finished.  Run \"mongrel_rails start -C #@generate\" to use the config file."
@@ -91,18 +92,29 @@ module Mongrel
       end
 
       config = Mongrel::Rails::RailsConfigurator.new(settings) do
-        if defaults[:daemon]
-          if File.exist? defaults[:pid_file]
+        if File.exist? defaults[:pid_file]
+          unless defaults[:replace]
             log "!!! PID file #{defaults[:pid_file]} already exists.  Mongrel could be running already.  Check your #{defaults[:log_file]} for errors."
             log "!!! Exiting with error.  You must stop mongrel and clear the .pid before I'll attempt a start."
             exit 1
           end
-
+          
+          deprecated_pid_file = defaults[:pid_file].gsub(".pid", ".deprecated.pid")
+          File.rename(defaults[:pid_file], deprecated_pid_file)
+          
+          defaults[:replace] = lambda do
+            Mongrel::send_signal("TERM", deprecated_pid_file)
+            sleep(0.01) # Give the other process just a slight bit of time to disconnect it's server socket
+          end
+        else
+          defaults[:replace] = false
+        end
+        write_pid_file
+        
+        if defaults[:daemon]
           daemonize
           log "Daemonized, any open files are closed.  Look at #{defaults[:pid_file]} and #{defaults[:log_file]} for info."
           log "Settings loaded from #{@config_file} (they override command line)." if @config_file
-
-	  write_pid_file
         end
 
         log "Starting Mongrel listening at #{defaults[:host]}:#{defaults[:port]}"
@@ -189,7 +201,7 @@ module Mongrel
 
     def config_keys
       @config_keys ||=
-        %w(address host port cwd log_file pid_file environment docroot mime_map daemon debug includes config_script num_processors timeout throttle user group prefix unixmaster min_children max_children)
+        %w(address host port cwd log_file pid_file environment docroot mime_map daemon debug includes config_script num_processors timeout throttle user group prefix unixmaster min_children max_children replace)
     end
 
     def settings
@@ -208,7 +220,8 @@ module Mongrel
     begin
       Process.kill(signal, pid)
     rescue Errno::ESRCH
-      puts "Process does not exist.  Not running."
+      puts "Process does not exist.  Not running.  Removing #{pid_file}"
+      File.remove(pid_file)
     end
 
     puts "Done."

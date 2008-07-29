@@ -72,8 +72,8 @@ module Mongrel
     # actually if it is 0 then the sleep is not done at all.
     def initialize(throttle, timeout)
       @classifier = URIClassifier.new
-      @throttle = throttle
-      @timeout = timeout
+      @throttle = throttle || 0
+      @timeout = timeout || 60
     end
 
     # Does the majority of the IO processing.  It has been written in Ruby using
@@ -279,7 +279,7 @@ module Mongrel
     # The throttle parameter is a sleep timeout (in hundredths of a second) that is placed between 
     # socket.accept calls in order to give the server a cheap throttle time.  It defaults to 0 and
     # actually if it is 0 then the sleep is not done at all.
-    def initialize(host, port, num_processors=950, throttle=0, timeout=60)
+    def initialize(host, port, num_processors=950, throttle=nil, timeout=nil)
       @host = host
       @port = port
       @domain = "tcp"
@@ -387,11 +387,12 @@ module Mongrel
     attr_reader :num_children
     attr_reader :max_children
 
-    def initialize(host, port, min_children=5, max_children=nil, throttle = 0, timeout=60, log=nil, log_level=:debug)
-      @host     = host
-      @port     = port
-      @domain   = 'unix'
-      super(throttle, timeout)
+    def initialize(options = {})
+      super(options[:throttle], options[:timeout])
+      @domain        = 'unix'
+      @host          = options[:host]
+      @port          = options[:port]
+      @replace       = options[:replace]
 
       @min_children  = options[:min_children]
       @max_children  = (options[:max_children] == 0) ? nil : options[:max_children]
@@ -402,15 +403,26 @@ module Mongrel
       @listening_sockets = []
     end
     
-    def establish_server_socket
-      @server_socket = TCPServer.new(@host, @port)
-      @listening_sockets << @server_socket
-      @server_socket
-    end
-    
     def close_server_socket
       @listening_sockets.delete(server_socket)
       server_socket.close  rescue nil
+    end
+    
+    def establish_server_socket
+      if @replace
+        @replace.call
+        @replace = nil
+      end
+      
+      begin
+        @server_socket = TCPServer.new(@host, @port)
+      rescue Errno::EADDRINUSE
+        puts "In use"
+        sleep 0.1
+        retry
+      end
+      @listening_sockets << @server_socket
+      @server_socket
     end
     
     def server_socket
@@ -561,9 +573,7 @@ module Mongrel
     end
     
     def spawn_min_children
-      while @children.length < @min_children do
-        spawn_child
-      end
+      spawn_child while @children.length < @min_children
     end
     
     def spawn_child
@@ -635,7 +645,7 @@ module Mongrel
       configure_socket_options
 
       if defined?($tcp_defer_accept_opts) and $tcp_defer_accept_opts
-          @server_socket.setsockopt(*$tcp_defer_accept_opts) rescue nil
+          server_socket.setsockopt(*$tcp_defer_accept_opts) rescue nil
       end
 
       @acceptor = Thread.new do
