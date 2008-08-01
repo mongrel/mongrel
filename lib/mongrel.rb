@@ -43,6 +43,8 @@ module Mongrel
   class UriChangeEvent < Exception; end
   
   class MaxChildrenCapicityReached < Exception; end
+
+  class CouldntConnect < Exception; end
   
   # A Hash with one extra parameter for the HTTP body, used internally.
   class HttpParams < Hash
@@ -427,12 +429,14 @@ module Mongrel
         @replace = nil
       end
       
+      retries = 0
       begin
         @server_socket = TCPServer.new(@host, @port)
       rescue Errno::EADDRINUSE
         puts "In use"
         sleep 0.1
-        retry
+        retry if (retries += 1) <= 10
+        raise CouldntConnect
       end
       @listening_sockets << @server_socket
       @server_socket
@@ -681,6 +685,8 @@ module Mongrel
               @terminate = true
             rescue UriChangeEvent
               @children.values.each { |child| evict_child(child) }
+            rescue CouldntConnect => e
+              raise e
             rescue Object => e
               STDERR.puts "Server #{$$} Unhandled listen loop exception #{e.inspect}."
               STDERR.puts e.backtrace.join("\n")
