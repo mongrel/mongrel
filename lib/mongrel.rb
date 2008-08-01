@@ -392,6 +392,7 @@ module Mongrel
     class << self
       def before_fork_procs; @before_fork_procs ||= []; end
       def after_fork_procs; @after_fork_procs ||= []; end
+      def preload_application_procs; @preload_application_procs ||= []; end
       
       def before_fork(&block)
         before_fork_procs << block
@@ -399,6 +400,10 @@ module Mongrel
       
       def after_fork(&block)
         after_fork_procs << block
+      end
+
+      def preload_application(&block)
+        preload_application_procs << block
       end
     end
 
