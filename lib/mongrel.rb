@@ -421,6 +421,7 @@ module Mongrel
       @terminate     = false
       @children      = Hash.new
       @listening_sockets = []
+      self.class.preload_application_procs.each { |p| p.call }
     end
     
     def close_server_socket
