@@ -415,7 +415,7 @@ module Mongrel
       @replace       = options[:replace]
 
       @min_children  = options[:min_children]
-      @max_children  = (options[:max_children] == 0) ? nil : options[:max_children]
+      @max_children  = (options[:max_children] || 3).to_i
       raise ArgumentError, "max_children is set lower than min_children" if @max_children && @min_children > @max_children
       
       @terminate     = false
