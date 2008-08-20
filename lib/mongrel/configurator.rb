@@ -152,7 +152,7 @@ module Mongrel
           :host         => ops[:host],
           :port         => ops[:port].to_i,
           :min_children => ops[:min_children].to_i,
-          :max_childen  => ops[:max_childen] && ops[:max_childen].to_i,
+          :max_children => ops[:max_children] && ops[:max_children].to_i,
           :throttle     => ops[:throttle].to_i,
           :replace      => ops[:replace],
           :timeout      => ops[:timeout].to_i
