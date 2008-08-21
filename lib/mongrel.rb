@@ -203,7 +203,7 @@ module Mongrel
     end
     
     def stderr_log(msg)
-      stderr_log "#{msg}"
+      STDERR.puts "#{Time.now}: #{msg}"
     end
     
     # Runs the thing.  It returns the thread used so you can "join" it.  You can also
