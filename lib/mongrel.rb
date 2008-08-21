@@ -688,7 +688,7 @@ module Mongrel
               count = process_incoming_connections(60)
               
               # If nobody wants to talk to us, go terminate an excess child
-              evict_child(@children.values.find { |c| not c.busy? }) if count = 0 && @children.length > @min_children
+              evict_child(@children.values.find { |c| not c.busy? and c.idle_seconds > 60 }) if count = 0 && @children.length > @min_children
               
             rescue StopServer
               close_server_socket # immediately detach from the server socket
@@ -730,6 +730,8 @@ module Mongrel
       @pid = pid
       @client = true
       @request_start_time = nil
+      @started_at = Time.now
+      @last_idle_at = Time.now
     end
     
     def busy?
@@ -751,12 +753,21 @@ module Mongrel
     def close_client
       @client.close rescue nil if @client.respond_to?(:close)
       @client = nil
+      @last_idle_at = Time.now
     end
     
     def running_seconds
       busy? ? ( Time.now - @request_start_time ) : 0
     end
     
+    def age_in_seconds
+      Time.now - @started_at
+    end
+
+    def idle_seconds
+      Time.now - @last_idle_at
+    end
+
     def close_socket
       @socket.close rescue nil if @socket.respond_to?(:close)
     end
