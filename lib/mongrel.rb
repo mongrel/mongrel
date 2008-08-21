@@ -161,21 +161,21 @@ module Mongrel
       rescue EOFError,Errno::ECONNRESET,Errno::EPIPE,Errno::EINVAL,Errno::EBADF
         client.close rescue nil
       rescue HttpParserError => e
-        STDERR.puts "#{Time.now}: HTTP parse error, malformed request (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #{e.inspect}"
-        STDERR.puts "#{Time.now}: REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
+        stderr_log "HTTP parse error, malformed request (#{params[Const::HTTP_X_FORWARDED_FOR] || client.peeraddr.last}): #{e.inspect}"
+        stderr_log "REQUEST DATA: #{data.inspect}\n---\nPARAMS: #{params.inspect}\n---\n"
       rescue Errno::EMFILE
         reap_dead_workers('too many files')
       rescue Object => e
-        STDERR.puts "#{Time.now}: Read error: #{e.inspect}"
-        STDERR.puts e.backtrace.join("\n")
+        stderr_log "Read error: #{e.inspect}"
+        stderr_log e.backtrace.join("\n")
       ensure
         begin
           client.close
         rescue IOError
           # Already closed
         rescue Object => e
-          STDERR.puts "#{Time.now}: Client error: #{e.inspect}"
-          STDERR.puts e.backtrace.join("\n")
+          stderr_log "Client error: #{e.inspect}"
+          stderr_log e.backtrace.join("\n")
         end
         request.body.delete if request and request.body.class == Tempfile
       end
@@ -200,6 +200,10 @@ module Mongrel
           $tcp_defer_accept_opts = [Socket::SOL_SOCKET, Socket::SO_ACCEPTFILTER, ['httpready', nil].pack('a16a240')]
         end
       end
+    end
+    
+    def stderr_log(msg)
+      stderr_log "#{msg}"
     end
     
     # Runs the thing.  It returns the thread used so you can "join" it.  You can also
@@ -298,14 +302,14 @@ module Mongrel
     # after the reap is done.  It only runs if there are workers to reap.
     def reap_dead_workers(reason='unknown')
       if @workers.list.length > 0
-        STDERR.puts "#{Time.now}: Reaping #{@workers.list.length} threads for slow workers because of '#{reason}'"
+        stderr_log "Reaping #{@workers.list.length} threads for slow workers because of '#{reason}'"
         error_msg = "Mongrel timed out this thread: #{reason}"
         mark = Time.now
         @workers.list.each do |worker|
           worker[:started_on] = Time.now if not worker[:started_on]
 
           if mark - worker[:started_on] > @timeout + @throttle
-            STDERR.puts "Thread #{worker.inspect} is too old, killing."
+            stderr_log "Thread #{worker.inspect} is too old, killing."
             worker.raise(TimeoutError.new(error_msg))
           end
         end
@@ -320,7 +324,7 @@ module Mongrel
     # that much longer.
     def graceful_shutdown
       while (running_requests = reap_dead_workers("shutdown")) > 0
-        STDERR.puts "Waiting for #{running_requests} requests to finish, could take #{@timeout + @throttle} seconds."
+        stderr_log "Waiting for #{running_requests} requests to finish, could take #{@timeout + @throttle} seconds."
         sleep @timeout / 10
       end
     end
@@ -349,7 +353,7 @@ module Mongrel
               worker_list = @workers.list
   
               if worker_list.length >= @num_processors
-                STDERR.puts "Server overloaded with #{worker_list.length} processors (#@num_processors max). Dropping connection."
+                stderr_log "Server overloaded with #{worker_list.length} processors (#@num_processors max). Dropping connection."
                 client.close rescue nil
                 reap_dead_workers("max processors")
               else
@@ -369,14 +373,14 @@ module Mongrel
               # client closed the socket even before accept
               client.close rescue nil
             rescue Object => e
-              STDERR.puts "#{Time.now}: Unhandled listen loop exception #{e.inspect}."
-              STDERR.puts e.backtrace.join("\n")
+              stderr_log "Unhandled listen loop exception #{e.inspect}."
+              stderr_log e.backtrace.join("\n")
             end
           end
           graceful_shutdown
         ensure
           @socket.close unless @socket.closed?
-          # STDERR.puts "#{Time.now}: Closed socket."
+          # stderr_log "Closed socket."
         end
       end
 
@@ -458,10 +462,10 @@ module Mongrel
     
     def reap_dead_workers(reason='unknown')
       if busy_children.length > 0
-        STDERR.puts "#{Time.now}: Reaping #{busy_children.length} child(ren) because of '#{reason}'"
+        stderr_log "Reaping #{busy_children.length} child(ren) because of '#{reason}'"
         busy_children.each do |child|
           if child.busy? && child.running_seconds > @timeout # + @throttle
-            STDERR.puts "Child #{child.pid} has been running too long, killing."
+            stderr_log "Child #{child.pid} has been running too long, killing."
             evict_child(child)#.raise(TimeoutError.new(error_msg))
           end
         end
@@ -476,7 +480,7 @@ module Mongrel
     # that much longer.
     def graceful_shutdown
       while (reap_dead_workers("shutdown")) > 0
-        STDERR.puts "Waiting for #{busy_children.length} requests to finish, could take #{@timeout + @throttle} seconds."
+        stderr_log "Waiting for #{busy_children.length} requests to finish, could take #{@timeout + @throttle} seconds."
         process_incoming_connections(@timeout / 10)
       end
     end
@@ -512,8 +516,8 @@ module Mongrel
               @terminate = true
             rescue Object => e
               @terminte = true
-              STDERR.puts "Child #{$$} Unhandled listen loop exception #{e.inspect}."
-              STDERR.puts e.backtrace.join("\n")
+              stderr_log "Child #{$$} Unhandled listen loop exception #{e.inspect}."
+              stderr_log e.backtrace.join("\n")
             end
           end
         ensure
@@ -546,8 +550,8 @@ module Mongrel
           end
           Kernel.exit!(0)
         rescue Object => e
-          STDERR.puts "Child #{$$} Unhandled listen loop exception #{e.inspect}."
-          STDERR.puts e.backtrace.join("\n")
+          stderr_log "Child #{$$} Unhandled listen loop exception #{e.inspect}."
+          stderr_log e.backtrace.join("\n")
         end
         Kernel.exit!(1)
       end
@@ -571,8 +575,8 @@ module Mongrel
         # be sure to pass the stop up the call chain until it gets to the toplevel handler!
         raise
       rescue Object => e
-        STDERR.puts "Server #{$$} Unhandled exception #{e.inspect}."
-        STDERR.puts :error, e.backtrace.join("\n")
+        stderr_log "Server #{$$} Unhandled exception #{e.inspect}."
+        stderr_log :error, e.backtrace.join("\n")
       end
       
       child.close
@@ -590,8 +594,8 @@ module Mongrel
         rescue StopServer
           raise # pass it up the chain, don't ignore it.
         rescue Object => e
-          STDERR.puts "Server #{$$} Unhandled exception #{e.inspect}."
-          STDERR.puts e.backtrace.join("\n")
+          stderr_log "Server #{$$} Unhandled exception #{e.inspect}."
+          stderr_log e.backtrace.join("\n")
         end
 
         evict_child(child) if do_evict
@@ -621,11 +625,11 @@ module Mongrel
       child = @children.values.find { |c| not c.busy? } || spawn_child!
       child.receive(client)
     rescue MaxChildrenCapicityReached
-      STDERR.puts "Server #{$$} Maximum number of child processes exceeded, request aborted"
+      stderr_log "Server #{$$} Maximum number of child processes exceeded, request aborted"
       client.close rescue nil
     rescue StandardError => e
-      STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary."
-      STDERR.puts "Server #{$$} #{e.message}"
+      stderr_log "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary."
+      stderr_log "Server #{$$} #{e.message}"
     end
     
     def process_child_status_update(socket)
@@ -659,7 +663,7 @@ module Mongrel
         begin
           forward_http_request(http_connection.accept)
         rescue StandardError => e
-          STDERR.puts "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary.   #{e.message}"
+          stderr_log "Server #{$$} An error occurred accepting a new client connection, a restart may be necessary.   #{e.message}"
         end
       end
       
@@ -694,8 +698,8 @@ module Mongrel
             rescue CouldntConnect => e
               raise e
             rescue Object => e
-              STDERR.puts "Server #{$$} Unhandled listen loop exception #{e.inspect}."
-              STDERR.puts e.backtrace.join("\n")
+              stderr_log "Server #{$$} Unhandled listen loop exception #{e.inspect}."
+              stderr_log e.backtrace.join("\n")
             end
           end
           graceful_shutdown
