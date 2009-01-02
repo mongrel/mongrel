@@ -43,6 +43,7 @@ lib/mongrel/stats.rb
 lib/mongrel/tcphack.rb
 lib/mongrel/uri_classifier.rb
 lib/mongrel.rb
+lib/super-cow-mongrel/init.rb
 LICENSE
 Manifest
 mongrel-public_cert.pem

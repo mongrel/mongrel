@@ -3,7 +3,7 @@ require 'rubygems'
 gem 'echoe', '>=2.7.5'
 require 'echoe'
 
-e = Echoe.new("mongrel") do |p|
+e = Echoe.new("super-cow-mongrel") do |p|
   p.summary = "A small fast HTTP library and server that runs Rails, Camping, Nitro and Iowa apps."
   p.author ="Zed A. Shaw"
   p.clean_pattern = ['ext/http11/*.{bundle,so,o,obj,pdb,lib,def,exp}', 'lib/*.{bundle,so,o,obj,pdb,lib,def,exp}', 'ext/http11/Makefile', 'pkg', 'lib/*.bundle', '*.gem', 'site/output', '.config', 'lib/http11.jar', 'ext/http11_java/classes', 'coverage', 'doc']
