@@ -423,11 +423,15 @@ module Mongrel
       raise ArgumentError, "max_children is set lower than min_children" if @max_children && @min_children > @max_children
       
       @terminate     = false
-      @children      = Hash.new
+      @children      = []
       @listening_sockets = []
       self.class.preload_application_procs.each { |p| p.call }
     end
     
+    def child_with_pid(pid)
+      @children.find { |c| c.pid == pid }
+    end
+
     def close_server_socket
       @listening_sockets.delete(server_socket)
       server_socket.close  rescue nil
@@ -457,7 +461,7 @@ module Mongrel
     end
         
     def busy_children
-      @children.values.select { |c| c.busy? }
+      @children.select { |c| c.busy? }
     end
     
     def reap_dead_workers(reason='unknown')
@@ -561,7 +565,9 @@ module Mongrel
     end
 
     def evict_child_by_pid(pid)
-      evict_child(@children[pid]) if @children.has_key?(pid)
+      if child = child_with_pid(pid)
+        evict_child(child)
+      end
     end
     
     def evict_child(child)
@@ -581,11 +587,11 @@ module Mongrel
       
       child.close
       @listening_sockets.delete(child.socket)
-      @children.delete(child.pid)
+      @children.delete_if { |c| c.pid == child.pid }
     end
     
     def gc_children
-      @children.values.each do |child|
+      @children.each do |child|
         begin
           do_evict = false
           do_evict = true if (child.closed? or child.hanging?)
@@ -610,7 +616,7 @@ module Mongrel
       raise MaxChildrenCapicityReached if @max_children && @children.length >= @max_children
       pid, socket = fork_child
       child = UnixDispatchChild.new(pid, socket)
-      @children[pid] = child
+      @children << child
       child
     end
     
@@ -622,7 +628,7 @@ module Mongrel
     end
     
     def forward_http_request(client)
-      child = @children.values.find { |c| not c.busy? } || spawn_child!
+      child = @children.find { |c| not c.busy? } || spawn_child!
       child.receive(client)
     rescue MaxChildrenCapicityReached
       stderr_log "Server #{$$} Maximum number of child processes exceeded, request aborted"
@@ -635,14 +641,14 @@ module Mongrel
     def process_child_status_update(socket)
       case socket.readline.chomp
       when /^READY\s+(\d+)$/
-        return unless (child = @children[$1.to_i])
+        return unless (child = child_with_pid($1.to_i))
         child.close_client
       when /CLOSED\s+(\d+)/
         evict_child_by_pid($1.to_i)
       end
     rescue EOFError
       # Child process has gone mad - give it the boot
-      evict_child(@children.values.find { |c| child.socket == socket })
+      evict_child(@children.find { |c| child.socket == socket })
     end
     
     def wait_for_incoming_connections(time_to_wait)
@@ -688,13 +694,13 @@ module Mongrel
               count = process_incoming_connections(60)
               
               # If nobody wants to talk to us, go terminate an excess child
-              evict_child(@children.values.find { |c| not c.busy? and c.idle_seconds > 60 }) if count = 0 && @children.length > @min_children
+              evict_child(@children.find { |c| not c.busy? and c.idle_seconds > 60 }) if count = 0 && @children.length > @min_children
               
             rescue StopServer
               close_server_socket # immediately detach from the server socket
               @terminate = true
             rescue UriChangeEvent
-              @children.values.each { |child| evict_child(child) }
+              @children.each { |child| evict_child(child) }
             rescue CouldntConnect => e
               raise e
             rescue Object => e
@@ -705,7 +711,7 @@ module Mongrel
           graceful_shutdown
         ensure
           close_server_socket
-          @children.values.each { |child| evict_child(child) }
+          @children.each { |child| evict_child(child) }
         end
       end # end thread
 
